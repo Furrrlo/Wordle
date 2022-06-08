@@ -53,7 +53,6 @@ int char_to_pos(char c)
 typedef struct word_tree_node 
 {
   struct word_tree_node **children;
-  size_t size; // Even if I make it smaller, it's going to be a 16bytes struct anyway for alignment
 } word_tree_t;
 
 word_tree_t *new_word_tree()
@@ -69,7 +68,6 @@ word_tree_t *new_word_tree()
 #endif
 
   ref->children = NULL;
-  ref->size = 0;
   return ref;
 }
 
@@ -77,13 +75,10 @@ void word_tree_free(word_tree_t *tree)
 {
   if(tree->children)
   {
-    for(int i = 0; tree->size > 0 && i < ALPHABETH_SIZE; ++i)
+    for(int i = 0; i < ALPHABETH_SIZE; ++i)
     {  
       if(tree->children[i] != NULL)
-      {
         word_tree_free(tree->children[i]);
-        tree->size--;
-      }
     }
     free(tree->children);
   }
@@ -106,7 +101,6 @@ int word_tree_contains(const word_tree_t *tree, char *str)
   return 1;
 }
 
-#define DELETE_SUBTREE 0
 #define VISIT_SUBTREE 1
 #define SKIP_SUBTREE 2
 
@@ -114,10 +108,7 @@ int word_tree_contains(const word_tree_t *tree, char *str)
 int word_tree_push_helper(word_tree_t *tree, char *str, int i)
 {
   if(!str[i])
-  {
-    tree->size++;
     return 1;
-  }
 
   int pos = char_to_pos(str[i]);
   if(pos == -1)
@@ -140,10 +131,7 @@ int word_tree_push_helper(word_tree_t *tree, char *str, int i)
   if(tree->children[pos] == NULL)
     tree->children[pos] = new_word_tree();
 
-  int res = word_tree_push_helper(tree->children[pos], str, i + 1);
-  if(res)
-    tree->size++;
-  return res;
+  return word_tree_push_helper(tree->children[pos], str, i + 1);
 }
 
 int word_tree_push(word_tree_t *tree, char *str)
@@ -151,12 +139,11 @@ int word_tree_push(word_tree_t *tree, char *str)
   return word_tree_push_helper(tree, str, 0);
 }
 
-void word_tree_filter_helper(word_tree_t *tree, 
-                             int pos, 
-                             int len, int *removed_len, 
-                             char *str, int freq[ALPHABETH_SIZE], 
-                             int (*filter)(int, char, int),
-                             int (*func)(char*, int*))
+void word_tree_for_each_ordered_helper(word_tree_t *tree, 
+                                       int pos, int len, 
+                                       char *str, int freq[ALPHABETH_SIZE], 
+                                       int (*filter)(int, char, int),
+                                       void (*func)(char*, int*))
 {
   for(int i = 0; i < ALPHABETH_SIZE; ++i)
   {
@@ -170,93 +157,30 @@ void word_tree_filter_helper(word_tree_t *tree,
     if(filter_res == SKIP_SUBTREE)
       continue;
 
-    if(filter_res == DELETE_SUBTREE)
-    {
-      *removed_len += child->size;
-      word_tree_free(child);
-      tree->children[i] = NULL;
-      continue;
-    }
-
     str[pos] = c;
     if(pos + 1 < len)
     {
-      int child_removed_len = 0;
       freq[i]++;
-      word_tree_filter_helper(child, pos + 1, len, &child_removed_len, str, freq, filter, func);
+      word_tree_for_each_ordered_helper(child, pos + 1, len, str, freq, filter, func);
       freq[i]--;
-      *removed_len += child_removed_len;
-
-
-      if(child->size == 0)
-      {
-        word_tree_free(child);
-        tree->children[i] = NULL;
-      }
-
       continue;
     }
 
     freq[i]++;
-    int keep_leaf = func(str, freq); 
+    func(str, freq); 
     freq[i]--;
-    if(!keep_leaf)
-    {
-      *removed_len += child->size;
-      word_tree_free(child); // Should be a leaf anyway
-      tree->children[i] = NULL;
-      continue;
-    } 
   }
-
-  tree->size -= *removed_len;
 }
 
-void word_tree_filter(word_tree_t *tree, 
-                      int len,
-                      int (*filter)(int, char, int), 
-                      int (*func)(char*, int*))
+void word_tree_for_each_ordered(word_tree_t *tree, 
+                                int len,
+                                int (*filter)(int, char, int), 
+                                void (*func)(char*, int*))
 {
-#ifdef DEBUG
-  int initial_size = tree->size;
-#endif
-
-  int removed_len = 0;
   char word[len + 1];
   word[len] = '\0';
   int freq[ALPHABETH_SIZE] = {0};
-  word_tree_filter_helper(tree, 0, len, &removed_len, word, freq, filter, func);
-
-#ifdef DEBUG
-  int removed_len0 = removed_len;
-  removed_len = 0;
-
-  int size = 0;
-  word_tree_filter_helper(tree, 0, len, &removed_len, word, freq,
-      LAMBDA(int, (int pos, char c, int char_freq) { return VISIT_SUBTREE; }), 
-      LAMBDA(int, (char *str, int *freq) { size++; return 1; }));
-  if(size != tree->size)
-  {
-    printf("Tree size mismatch: expected %d but was %d (claim to have removed %d from %d)\n", tree->size, size, removed_len0, initial_size);
-    tree->size = size;
-  }
-#endif
-}
-
-void word_tree_for_each_ordered(word_tree_t *tree,
-                                int len,
-                                int (*filter)(int, char, int),
-                                void (*func)(char*, int*))
-{
-  word_tree_filter(
-      tree, len, 
-      LAMBDA(int, (int pos, char c, int char_freq) { 
-        int filter_res = filter(pos, c, char_freq);
-        if(filter_res == DELETE_SUBTREE)
-          return SKIP_SUBTREE;
-        return filter_res; 
-      }), 
-      LAMBDA(int, (char *str, int *freq) { func(str, freq); return 1; }));
+  word_tree_for_each_ordered_helper(tree, 0, len, word, freq, filter, func);
 }
 
 // Time - Theta(n)

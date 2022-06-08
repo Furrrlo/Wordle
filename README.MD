@@ -4,7 +4,7 @@ Uses gcc specific extensions and bad code in general.
 - word_tree.c stores each character of the given alphabeth as a tree node and filters by first copying to a 
   second tree. Exceeds in space complecity.
 - single_word_tree.c is the same as the above, but keeps 1 single tree and filters it each time it has to
-  print or calculate its size. Exceeds in time complexity. 
+  print or calculate its size. Still exceeds in space complexity. 
 
 ## Grading
 
@@ -22,7 +22,7 @@ diff output.txt tests/slide.output.txt
 
 For testing
 
-`gcc -fno-omit-frame-pointer -fsanitize=undefined -fsanitize=address -g <input>.c` 
+`gcc -DDEBUG -fno-omit-frame-pointer -fsanitize=undefined -fsanitize=address -g <input>.c` 
 
 For grading
 
