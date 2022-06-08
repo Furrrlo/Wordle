@@ -11,6 +11,28 @@ Uses gcc specific extensions and bad code in general.
 UpTo18 test uses between 163.840 and 204.800 test strings of 5 characters each 
 (found by tinkering with the array_list size).
 
+In some tests, input is messed up and doesn't respect what's indicated in the requisites, i.e. 
+characters out of the given alphabeth, or instruction given at the wrong time (in particular, I think it's in the UpTo30).
+
+This, for example, is apparently valid:
+```
+5
+39rw7
+_28Zo
+wYx6_
+56j-U
+mUO3f
+QI_9l
++inserisci_inizio
+XYkRe
+gJyPe
+gJyPp
+XJyRe
+_JkPp
++inserisci_fine
++nuova_partita
+``` 
+
 ## Testing
 
 ```
