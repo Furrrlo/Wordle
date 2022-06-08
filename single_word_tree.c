@@ -139,6 +139,26 @@ int word_tree_push(word_tree_t *tree, char *str)
   return word_tree_push_helper(tree, str, 0);
 }
 
+void word_tree_slots_statistics(word_tree_t *tree, int pos, int len, int *wasted_slots, int *used_slots)
+{
+  for(int i = 0; i < ALPHABETH_SIZE; ++i)
+  {
+    if(tree->children == NULL)
+      continue;
+    
+    word_tree_t *child = tree->children[i];
+    if(child == NULL)
+    {
+      (*wasted_slots)++;
+      continue;
+    }
+
+    (*used_slots)++;
+    if(pos + 1 < len)
+      word_tree_slots_statistics(child, pos + 1, len, wasted_slots, used_slots);
+  }
+}
+
 void word_tree_for_each_ordered_helper(word_tree_t *tree, 
                                        int pos, int len, 
                                        char *str, int freq[ALPHABETH_SIZE], 
@@ -522,6 +542,14 @@ quit_program:
 new_game:
     ref_dispose(&ref);
   }
+
+#ifdef DEBUG
+  int wasted_slots = 0;
+  int used_slots = 0;
+  word_tree_slots_statistics(tree, 0, len, &wasted_slots, &used_slots);
+  printf("used slots: %d - %.2f\n", used_slots, (double) used_slots / (double) (wasted_slots + used_slots));  
+  printf("wasted slots: %d - %.2f\n", wasted_slots, (double) wasted_slots / (double) (wasted_slots + used_slots));  
+#endif
 
   free(out);
   word_tree_free(tree);
