@@ -109,7 +109,7 @@ typedef struct word_tree_node
 
 typedef struct rb_tree
 {
-  char key;
+  unsigned char key; // 60 < 255, should be enough
   struct word_tree_node value;
 
   unsigned char color;
@@ -118,7 +118,7 @@ typedef struct rb_tree
   struct rb_tree *left;
 } *rb_tree_t;
 
-struct rb_tree global_rb_tree_nodes[8192 * 150];
+struct rb_tree global_rb_tree_nodes[8192 * 250];
 int global_rb_tree_nodes_cursor = 0;
 
 struct rb_tree *new_rb_tree()
@@ -142,7 +142,7 @@ int rb_tree_is_empty(rb_tree_t tree)
   return tree == NULL;
 }
 
-void rb_tree_for_each_ordered(rb_tree_t tree, void (*func)(char, word_tree_t*))
+void rb_tree_for_each_ordered(rb_tree_t tree, void (*func)(int, word_tree_t*))
 {
   if(rb_tree_is_empty(tree))
       return;
@@ -152,7 +152,7 @@ void rb_tree_for_each_ordered(rb_tree_t tree, void (*func)(char, word_tree_t*))
   rb_tree_for_each_ordered(tree->right, func);
 }
 
-struct word_tree_node *rb_tree_get(rb_tree_t tree, char key)
+struct word_tree_node *rb_tree_get(rb_tree_t tree, int key)
 {
   if(rb_tree_is_empty(tree))
     return NULL;
@@ -294,7 +294,7 @@ void rb_tree_fixup(rb_tree_t *tree, struct rb_tree *node)
   root->color = BLACK;
 }
 
-struct word_tree_node *rb_tree_do_put(rb_tree_t *tree, char c, int allow_duplicates)
+struct word_tree_node *rb_tree_do_put(rb_tree_t *tree, int key, int allow_duplicates)
 {
   // struct rb_tree *new_node = (struct rb_tree*) malloc(sizeof(struct rb_tree));
   if(global_rb_tree_nodes_cursor >= sizeof(global_rb_tree_nodes) / sizeof(struct rb_tree))
@@ -314,7 +314,7 @@ struct word_tree_node *rb_tree_do_put(rb_tree_t *tree, char c, int allow_duplica
   }
 #endif
   
-  new_node->key = c;
+  new_node->key = key;
   new_node->value.children = new_rb_tree();
   new_node->value.deletion_level = 0;
   new_node->color = RED;
@@ -334,14 +334,14 @@ struct word_tree_node *rb_tree_do_put(rb_tree_t *tree, char c, int allow_duplica
   return &new_node->value;
 }
 
-struct word_tree_node *rb_tree_put(rb_tree_t *tree, char c)
+struct word_tree_node *rb_tree_put(rb_tree_t *tree, int key)
 {
-  return rb_tree_do_put(tree, c, 1);
+  return rb_tree_do_put(tree, key, 1);
 }
 
-struct word_tree_node *rb_tree_put_if_absent(rb_tree_t *tree, char c)
+struct word_tree_node *rb_tree_put_if_absent(rb_tree_t *tree, int key)
 {
-  return rb_tree_do_put(tree, c, 0);
+  return rb_tree_do_put(tree, key, 0);
 }
 
 word_tree_t *new_word_tree()
@@ -376,7 +376,7 @@ int word_tree_contains(const word_tree_t *tree, char *str)
   const word_tree_t *subtree = tree;
   for(int i = 0; str[i]; ++i)
   {
-    const word_tree_t *child = rb_tree_get(subtree->children, str[i]);
+    const word_tree_t *child = rb_tree_get(subtree->children, char_to_pos(str[i]));
     if(child == NULL)
       return 0;
 
@@ -400,7 +400,7 @@ int word_tree_push_helper(word_tree_t *tree, char *str, int i)
   if(pos == -1)
     return 0;
 
-  word_tree_t *child = rb_tree_put_if_absent(&tree->children, str[i]);
+  word_tree_t *child = rb_tree_put_if_absent(&tree->children, pos);
   return word_tree_push_helper(child, str, i + 1);
 }
 
@@ -416,11 +416,11 @@ void word_tree_for_each_ordered_helper(word_tree_t *tree,
                                        int (*func)(char*, int*))
 {
   int any_not_deleted = 0;
-  void (*visit_func)(char, word_tree_t*) = LAMBDA(void, (char c, word_tree_t *child) {
+  void (*visit_func)(int, word_tree_t*) = LAMBDA(void, (int i, word_tree_t *child) {
     if(child->deletion_level >= deletion_level)
       return;
 
-    int i = char_to_pos(c);
+    char c = pos_to_char(i);
     int filter_res = filter(pos, c, freq[i] + 1);
     if(filter_res == SKIP_SUBTREE)
       return;
@@ -457,9 +457,10 @@ void word_tree_for_each_ordered_helper(word_tree_t *tree,
 
   if(hint != NULL && hint[pos] != 0)
   {
-    word_tree_t *child = rb_tree_get(tree->children, hint[pos]);
+    int hint_pos = char_to_pos(hint[pos]);
+    word_tree_t *child = rb_tree_get(tree->children, hint_pos);
     if(child != NULL)
-      visit_func(hint[pos], child);
+      visit_func(hint_pos, child);
   }
   else
   {
