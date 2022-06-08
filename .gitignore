@@ -1,0 +1,5 @@
+*.out
+input.txt
+output.txt
+*Zone.Identifier
+*.swp
