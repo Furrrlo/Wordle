@@ -173,7 +173,7 @@ struct rb_tree *rb_tree_bst(rb_tree_t *tree, struct rb_tree *node, int allow_dup
   }
 
   if(!allow_duplicates && node->key == (*tree)->key)
-    return node;
+    return *tree;
 
   if(node->key < (*tree)->key)
   {
@@ -339,11 +339,7 @@ struct word_tree_node *rb_tree_put(rb_tree_t *tree, char c)
 
 struct word_tree_node *rb_tree_put_if_absent(rb_tree_t *tree, char c)
 {
-  // TODO: fix rb_tree_do_put 
-  word_tree_t *child = rb_tree_get(*tree, c);
-  if(child == NULL)
-    child = rb_tree_put(tree, c);
-  return child;
+  return rb_tree_do_put(tree, c, 0);
 }
 
 word_tree_t *new_word_tree()
