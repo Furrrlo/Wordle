@@ -18,28 +18,75 @@ char pos_to_char(int pos)
 
 int char_to_pos(char c)
 {
-  // This is to make it O(1)
-  int offset = 0;
-  if(c == '-')
-    return offset;
-  ++offset;
-  
-  if(c >= '0' && c <= '9')
-    return offset + (c - '0');
-  offset += ('9' - '0') + 1;
-  
-  if(c >= 'A' && c <= 'Z')
-    return offset + (c - 'A');
-  offset += ('Z' - 'A') + 1;
-
-  if(c == '_')
-    return offset;
-  ++offset;
-
-  if(c >= 'a' && c <= 'z')
-    return offset + (c - 'a');
-  offset += ('z' - 'a') + 1;
-  
+  // Valgrind says this is a hot method :I
+  // I need that jump-table performance
+  switch(c)
+  {
+    case '-': return 0;
+    case '0': return 1;
+    case '1': return 2;
+    case '2': return 3;
+    case '3': return 4;
+    case '4': return 5;
+    case '5': return 6;
+    case '6': return 7;
+    case '7': return 8;
+    case '8': return 9;
+    case '9': return 10;
+    case 'A': return 11;
+    case 'B': return 12;
+    case 'C': return 13;
+    case 'D': return 14;
+    case 'E': return 15;
+    case 'F': return 16;
+    case 'G': return 17;
+    case 'H': return 18;
+    case 'I': return 19;
+    case 'J': return 20;
+    case 'K': return 21;
+    case 'L': return 22;
+    case 'M': return 23;
+    case 'N': return 24;
+    case 'O': return 25;
+    case 'P': return 26;
+    case 'Q': return 27;
+    case 'R': return 28;
+    case 'S': return 29;
+    case 'T': return 30;
+    case 'U': return 31;
+    case 'V': return 32;
+    case 'W': return 33;
+    case 'X': return 34;
+    case 'Y': return 35;
+    case 'Z': return 36;
+    case '_': return 37;
+    case 'a': return 38;
+    case 'b': return 39;
+    case 'c': return 40;
+    case 'd': return 41;
+    case 'e': return 42;
+    case 'f': return 43;
+    case 'g': return 44;
+    case 'h': return 45;
+    case 'i': return 46;
+    case 'j': return 47;
+    case 'k': return 48;
+    case 'l': return 49;
+    case 'm': return 50;
+    case 'n': return 51;
+    case 'o': return 52;
+    case 'p': return 53;
+    case 'q': return 54;
+    case 'r': return 55;
+    case 's': return 56;
+    case 't': return 57;
+    case 'u': return 58;
+    case 'v': return 59;
+    case 'w': return 60;
+    case 'x': return 61;
+    case 'y': return 62;
+    case 'z': return 63;
+  }
 #ifdef DEBUG
   // Fallback to looping just to make sure
   for(int i = 0; i < ALPHABETH_SIZE; ++i)
