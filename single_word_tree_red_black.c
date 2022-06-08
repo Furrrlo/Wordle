@@ -401,12 +401,19 @@ int word_tree_push_helper(word_tree_t *tree, char *str, int i)
     return 0;
 
   word_tree_t *child = rb_tree_put_if_absent(&tree->children, pos);
-  return word_tree_push_helper(child, str, i + 1);
+  int res = word_tree_push_helper(child, str, i + 1);
+  if(res)
+    tree->deletion_level = 0;
+  return res;
 }
 
 int word_tree_push(word_tree_t *tree, char *str)
 {
-  return word_tree_push_helper(tree, str, 0);
+  int root_deletion_level = tree->deletion_level;
+  int res = word_tree_push_helper(tree, str, 0);
+  // Make sure it's not reset to 0
+  tree->deletion_level = root_deletion_level;
+  return res;
 }
 
 void word_tree_for_each_ordered_helper(word_tree_t *tree, 
