@@ -559,26 +559,37 @@ void print_found_ref(reference_t *ref)
 }
 
 /* Time - Theta(n) */
-void compare_words(reference_t *ref, char *new, char *out)
+int compare_words(reference_t *ref, char *new, char *out)
 {
   // Spatial - Stack allocated, constant
   // Time - Theta(n)
   int new_freq[ALPHABETH_SIZE] = {0};
   memcpy(new_freq, ref->freq, sizeof(new_freq));
 
+  int anything_changed = 0;
   // First pass, find letters which are the same
   // Theta(n)
   for(int i = 0; i < ref->len; ++i)
   {
     if(ref->word[i] != new[i])
       continue;
-
-    ref->found_chars[i] = ref->word[i];
+    
     out[i] = '+';
+    if(ref->found_chars[i] != ref->word[i])
+    {
+      ref->found_chars[i] = ref->word[i];
+      anything_changed = 1;
+    }
 
     int pos = char_to_pos(new[i]);
     --new_freq[pos];
-    ref->found_freq_min[pos] = MAX(ref->found_freq_min[pos], ref->freq[pos] - new_freq[pos]);
+
+    int min_ref = ref->freq[pos] - new_freq[pos]; 
+    if(min_ref > ref->found_freq_min[pos])
+    {
+      ref->found_freq_min[pos] = min_ref;
+      anything_changed = 1;
+    }
   }
 
   // Second pass, letters which are wrong or at the wrong place
@@ -594,14 +605,25 @@ void compare_words(reference_t *ref, char *new, char *out)
     {
       out[i] = '/';
       found_not_char = ref->freq[pos] > 0;
-      ref->found_freq_max[pos] = ref->freq[pos];
+      
+      if(ref->found_freq_max[pos] != ref->freq[pos])
+      {
+        ref->found_freq_max[pos] = ref->freq[pos];
+        anything_changed = 1;
+      }
     }
     else
     {
       out[i] = '|';
       found_not_char = 1;
       --new_freq[pos];
-      ref->found_freq_min[pos] = MAX(ref->found_freq_min[pos], ref->freq[pos] - new_freq[pos]);
+
+      int min_freq = ref->freq[pos] - new_freq[pos];
+      if(min_freq > ref->found_freq_min[pos])
+      {
+        ref->found_freq_min[pos] = min_freq;
+        anything_changed = 1;
+      }
     }
 
     if(found_not_char)
@@ -624,9 +646,12 @@ void compare_words(reference_t *ref, char *new, char *out)
       {
         str[len] = to_append;
         str[len + 1] = '\0';
+        anything_changed = 1;
       }
     }
   }
+
+  return anything_changed;
 }
 
 void filter_dictionary(reference_t *ref, word_tree_t *tree, void (*func)(char*))
@@ -741,6 +766,8 @@ int main()
   char *out = (char*) malloc((len + 1) * sizeof(char));
   out[len] = '\0';
 
+  size_t last_size = -1;
+
   word_tree_t *tree = new_word_tree();
   populate_dictionary(tree, len, "+nuova_partita");
   
@@ -801,12 +828,15 @@ int main()
       }
       else
       {
-        compare_words(&ref, line, out);
+        int changed = compare_words(&ref, line, out);
         printf("%s\n", out);
 
-        size_t size = 0;
-        filter_dictionary(&ref, tree, LAMBDA(void, (char *str) { size++; }));
-        printf("%ld\n", size);
+        if(last_size == -1 || changed)
+        {
+          last_size = 0;
+          filter_dictionary(&ref, tree, LAMBDA(void, (char *str) { last_size++; }));
+        }
+        printf("%ld\n", last_size);
 
         if(++tries >= max_guesses)
         {
