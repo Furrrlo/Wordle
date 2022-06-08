@@ -26,4 +26,4 @@ For testing
 
 For grading
 
-`gcc -DEVAL -Wall -Werror -std=gnu11 -O2 -pipe -static -s -o <input>.c -lm`
+`gcc -DEVAL -Wall -Werror -std=gnu11 -O2 -pipe -static -s <input>.c -lm`
