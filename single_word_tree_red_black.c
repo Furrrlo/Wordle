@@ -117,6 +117,9 @@ typedef struct rb_tree
   struct rb_tree *left;
 } *rb_tree_t;
 
+struct rb_tree global_rb_tree_nodes[8192 * 150];
+int global_rb_tree_nodes_cursor = 0;
+
 struct rb_tree *new_rb_tree()
 {
   return NULL;
@@ -127,10 +130,10 @@ void rb_tree_free(rb_tree_t tree)
   if(tree == NULL)
     return;
 
-  rb_tree_free(tree->value.children);
-  rb_tree_free(tree->right);
-  rb_tree_free(tree->left);
-  free(tree);
+  // rb_tree_free(tree->value.children);
+  // rb_tree_free(tree->right);
+  // rb_tree_free(tree->left);
+  // free(tree);
 }
 
 int rb_tree_is_empty(rb_tree_t tree)
@@ -292,7 +295,15 @@ void rb_tree_fixup(rb_tree_t *tree, struct rb_tree *node)
 
 struct word_tree_node *rb_tree_do_put(rb_tree_t *tree, char c, int allow_duplicates)
 {
-  struct rb_tree *new_node = (struct rb_tree*) malloc(sizeof(struct rb_tree));
+  // struct rb_tree *new_node = (struct rb_tree*) malloc(sizeof(struct rb_tree));
+  if(global_rb_tree_nodes_cursor >= sizeof(global_rb_tree_nodes) / sizeof(struct rb_tree))
+  {
+    printf("No more rb_tree nodes\n");
+    exit(-20);
+    return NULL;
+  }
+  
+  struct rb_tree *new_node = &global_rb_tree_nodes[global_rb_tree_nodes_cursor++];
 #ifdef DEBUG
   if(new_node == NULL)
   {
@@ -312,7 +323,8 @@ struct word_tree_node *rb_tree_do_put(rb_tree_t *tree, char c, int allow_duplica
   struct rb_tree *already_present = rb_tree_bst(tree, new_node, allow_duplicates);
   if(already_present != NULL)
   {
-    rb_tree_free(new_node);
+    // rb_tree_free(new_node);
+    global_rb_tree_nodes_cursor--;
     return &already_present->value;
   }
 
@@ -775,6 +787,6 @@ new_game:
   }
 
   free(out);
-  word_tree_free(tree);
+  // word_tree_free(tree);
   return 0;
 }
