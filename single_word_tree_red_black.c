@@ -101,6 +101,7 @@ struct rb_tree;
 typedef struct word_tree_node 
 {
   struct rb_tree *children;
+  unsigned short deletion_level;
 } word_tree_t;
 
 #define BLACK 0
@@ -315,6 +316,7 @@ struct word_tree_node *rb_tree_do_put(rb_tree_t *tree, char c, int allow_duplica
   
   new_node->key = c;
   new_node->value.children = new_rb_tree();
+  new_node->value.deletion_level = 0;
   new_node->color = RED;
   new_node->right = NULL;
   new_node->left = NULL;
@@ -355,6 +357,7 @@ word_tree_t *new_word_tree()
 #endif
 
   ref->children = new_rb_tree();
+  ref->deletion_level = 0;
   return ref;
 }
 
@@ -385,6 +388,8 @@ int word_tree_contains(const word_tree_t *tree, char *str)
 
 #define VISIT_SUBTREE 1
 #define SKIP_SUBTREE 2
+#define MARK_KEPT 3
+#define MARK_DELETED 4
 
 int word_tree_push_helper(word_tree_t *tree, char *str, int i)
 {
@@ -405,41 +410,80 @@ int word_tree_push(word_tree_t *tree, char *str)
 }
 
 void word_tree_for_each_ordered_helper(word_tree_t *tree, 
-                                       int pos, int len, 
+                                       int pos, int len, int deletion_level, char *hint, 
                                        char *str, int freq[ALPHABETH_SIZE], 
                                        int (*filter)(int, char, int),
-                                       void (*func)(char*, int*))
+                                       int (*func)(char*, int*))
 {
-  rb_tree_for_each_ordered(tree->children, LAMBDA(void, (char c, word_tree_t *child) {
+  int any_not_deleted = 0;
+  void (*visit_func)(char, word_tree_t*) = LAMBDA(void, (char c, word_tree_t *child) {
+    if(child->deletion_level >= deletion_level)
+      return;
+
     int i = char_to_pos(c);
     int filter_res = filter(pos, c, freq[i] + 1);
     if(filter_res == SKIP_SUBTREE)
       return;
 
+    if(filter_res == MARK_DELETED)
+    {
+      child->deletion_level = deletion_level;
+      return; 
+    }
+
+    if(child->deletion_level < deletion_level)
+      any_not_deleted = 1;
+
     str[pos] = c;
     if(pos + 1 < len)
     {
       freq[i]++;
-      word_tree_for_each_ordered_helper(child, pos + 1, len, str, freq, filter, func);
+      word_tree_for_each_ordered_helper(child, pos + 1, len, 
+          deletion_level, hint, str, freq, filter, func);
       freq[i]--;
       return;
     }
+    else
+    {
+      freq[i]++;
+      if(func(str, freq) == MARK_DELETED)
+        child->deletion_level = deletion_level;
+      freq[i]--;
+    }
 
-    freq[i]++;
-    func(str, freq); 
-    freq[i]--;
-  }));
+    if(child->deletion_level < deletion_level)
+      any_not_deleted = 1;
+  });
+
+  if(hint != NULL && hint[pos] != 0)
+  {
+    word_tree_t *child = rb_tree_get(tree->children, hint[pos]);
+    if(child != NULL)
+      visit_func(hint[pos], child);
+  }
+  else
+  {
+    rb_tree_for_each_ordered(tree->children, visit_func);
+  }
+
+  if(!any_not_deleted)
+    tree->deletion_level = deletion_level;
 }
 
 void word_tree_for_each_ordered(word_tree_t *tree, 
-                                int len,
+                                int len, char *hint,
                                 int (*filter)(int, char, int), 
-                                void (*func)(char*, int*))
+                                int (*func)(char*, int*))
 {
   char word[len + 1];
   word[len] = '\0';
   int freq[ALPHABETH_SIZE] = {0};
-  word_tree_for_each_ordered_helper(tree, 0, len, word, freq, filter, func);
+  word_tree_for_each_ordered_helper(tree, 0, len, tree->deletion_level, hint, word, freq, filter, func);
+}
+
+void word_tree_undelete_all(word_tree_t *tree)
+{
+  tree->deletion_level++;
 }
 
 // Time - Theta(n)
@@ -588,22 +632,18 @@ void compare_words(reference_t *ref, char *new, char *out)
 void filter_dictionary(reference_t *ref, word_tree_t *tree, void (*func)(char*))
 {
   int (*known_chars_filter)(int, char, int) = LAMBDA(int, (int pos, char c, int char_freq) {
-    
-    if(ref->found_chars[pos] != 0 && ref->found_chars[pos] != c)
-      return SKIP_SUBTREE;
-
     if(ref->found_not_chars[pos])
     {
       char *found_not_chars = ref->found_not_chars[pos];
       // Max ALPHABETH_SIZE, so should be fairly small
       for(int k = 0; found_not_chars[k]; ++k)
         if(c == found_not_chars[k])
-          return SKIP_SUBTREE;
+          return MARK_DELETED;
     }
 
     int alphabeth_pos = char_to_pos(c);
     if(ref->found_freq_max[alphabeth_pos] >= 0 && char_freq > ref->found_freq_max[alphabeth_pos])
-      return SKIP_SUBTREE;
+      return MARK_DELETED;
 
     return VISIT_SUBTREE;
   });
@@ -611,17 +651,15 @@ void filter_dictionary(reference_t *ref, word_tree_t *tree, void (*func)(char*))
       for(int i = 0; i < ALPHABETH_SIZE; ++i)
       {
         if(freq[i] < ref->found_freq_min[i])
-          return 0;
+           return MARK_DELETED;
       }
 
-      return 1; 
+      func(str);
+      return MARK_KEPT;
   }); 
 
   // Theta(n)
-  word_tree_for_each_ordered(tree, ref->len, known_chars_filter, LAMBDA(void, (char *str, int *freq) {
-    if(words_filter(str, freq))
-      func(str);
-  }));
+  word_tree_for_each_ordered(tree, ref->len, ref->found_chars, known_chars_filter, words_filter);
 }
 
 void populate_dictionary(word_tree_t *tree, int len, char *stop_command)
@@ -707,7 +745,7 @@ int main()
   populate_dictionary(tree, len, "+nuova_partita");
   
   for(int quit = 0; !quit; )
-  {  
+  {
     char ref_str[len + 1];
     int max_guesses;
     if(scanf("%s %d\n", ref_str, &max_guesses) < 0)
@@ -722,6 +760,8 @@ int main()
     reference_t ref;
     init_ref(&ref, ref_str, len);
 
+    word_tree_undelete_all(tree);
+    
     char line[MAX(len, 32) + 1];
    
     int tries = 0;
