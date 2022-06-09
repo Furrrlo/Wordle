@@ -733,11 +733,11 @@ int known_chars_filter(reference_t *ref, int pos, char c, int alphabeth_pos, int
 
 int words_filter(reference_t *ref, char *str, int *freq)
 {
-  /*for(int i = 0; i < ALPHABETH_SIZE; ++i)
+  for(int i = 0; i < ALPHABETH_SIZE; ++i)
   {
     if(freq[i] < ref->found_freq_min[i])
       return MARK_DELETED;
-  }*/
+  }
   
   return MARK_KEPT;
 }
