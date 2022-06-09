@@ -11,7 +11,7 @@
 // ASCII ordered
 char ALPHABETH[] = "-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
 
-inline char pos_to_char(int pos)
+static inline char pos_to_char(int pos)
 {
   return ALPHABETH[pos];
 }
@@ -120,7 +120,7 @@ typedef struct rb_tree
 struct rb_tree global_rb_tree_nodes[8192 * 250];
 int global_rb_tree_nodes_cursor = 0;
 
-inline struct rb_tree *new_rb_tree()
+static inline struct rb_tree *new_rb_tree()
 {
   return NULL;
 }
@@ -136,27 +136,27 @@ void rb_tree_free(rb_tree_t tree)
   // free(tree);
 }
 
-inline int rb_tree_is_empty(rb_tree_t tree)
+static inline int rb_tree_is_empty(rb_tree_t tree)
 {
   return tree == NULL;
 }
 
-inline struct rb_tree *rb_tree_parent(struct rb_tree *node)
+static inline struct rb_tree *rb_tree_parent(struct rb_tree *node)
 {
   return (struct rb_tree*) (node->_parent_color & ~3); 
 }
 
-inline unsigned char rb_tree_color(struct rb_tree *node)
+static inline unsigned char rb_tree_color(struct rb_tree *node)
 {
   return node->_parent_color & 3; 
 }
 
-inline void rb_tree_set_parent(struct rb_tree *node, struct rb_tree *parent)
+static inline void rb_tree_set_parent(struct rb_tree *node, struct rb_tree *parent)
 {
   node->_parent_color = (unsigned long) parent | rb_tree_color(node);
 }
 
-inline void rb_tree_set_color(struct rb_tree *node, unsigned char color)
+static inline void rb_tree_set_color(struct rb_tree *node, unsigned char color)
 {
   node->_parent_color = (node->_parent_color & ~3) | (color & 3);
 }
