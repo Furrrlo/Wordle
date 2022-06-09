@@ -681,37 +681,47 @@ int compare_words(reference_t *ref, char *new, char *out)
   return anything_changed;
 }
 
+int known_chars_filter(reference_t *ref, int pos, char c, int alphabeth_pos, int char_freq)
+{
+  if(ref->found_not_chars[pos])
+  {
+    char *found_not_chars = ref->found_not_chars[pos];
+    // Max ALPHABETH_SIZE, so should be fairly small
+    for(int k = 0; found_not_chars[k]; ++k)
+      if(c == found_not_chars[k])
+        return MARK_DELETED;
+  }
+
+  if(ref->found_freq_max[alphabeth_pos] >= 0 && char_freq > ref->found_freq_max[alphabeth_pos])
+    return MARK_DELETED;
+
+  return VISIT_SUBTREE;
+}
+
+int words_filter(reference_t *ref, char *str, int *freq)
+{
+  /*for(int i = 0; i < ALPHABETH_SIZE; ++i)
+  {
+    if(freq[i] < ref->found_freq_min[i])
+      return MARK_DELETED;
+  }*/
+  
+  return MARK_KEPT;
+}
+
 void filter_dictionary(reference_t *ref, word_tree_t *tree, void (*func)(char*))
 {
-  int (*known_chars_filter)(int, char, int) = LAMBDA(int, (int pos, char c, int char_freq) {
-    if(ref->found_not_chars[pos])
-    {
-      char *found_not_chars = ref->found_not_chars[pos];
-      // Max ALPHABETH_SIZE, so should be fairly small
-      for(int k = 0; found_not_chars[k]; ++k)
-        if(c == found_not_chars[k])
-          return MARK_DELETED;
-    }
-
-    int alphabeth_pos = char_to_pos(c);
-    if(ref->found_freq_max[alphabeth_pos] >= 0 && char_freq > ref->found_freq_max[alphabeth_pos])
-      return MARK_DELETED;
-
-    return VISIT_SUBTREE;
-  });
-  int (*words_filter)(char*, int*) = LAMBDA(int, (char *str, int *freq) { 
-      for(int i = 0; i < ALPHABETH_SIZE; ++i)
-      {
-        if(freq[i] < ref->found_freq_min[i])
-           return MARK_DELETED;
-      }
-
-      func(str);
-      return MARK_KEPT;
-  }); 
-
-  // Theta(n)
-  word_tree_for_each_ordered(tree, ref->len, ref->found_chars, known_chars_filter, words_filter);
+  // O(n)
+  word_tree_for_each_ordered(tree, ref->len, ref->found_chars, 
+      LAMBDA(int, (int pos, char c, int alphabeth_pos, int char_freq) { 
+        return known_chars_filter(ref, pos, c, alphabeth_pos, char_freq);
+      }), 
+      LAMBDA(int, (char *str, int *freq) {
+        int res = words_filter(ref, str, freq);
+        if(res == MARK_KEPT)
+          func(str);
+        return res;
+      }));
 }
 
 void populate_dictionary(word_tree_t *tree, int len, char *stop_command)
