@@ -11,7 +11,7 @@
 // ASCII ordered
 char ALPHABETH[] = "-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
 
-char pos_to_char(int pos)
+inline char pos_to_char(int pos)
 {
   return ALPHABETH[pos];
 }
@@ -121,7 +121,7 @@ typedef struct rb_tree
 struct rb_tree global_rb_tree_nodes[8192 * 250];
 int global_rb_tree_nodes_cursor = 0;
 
-struct rb_tree *new_rb_tree()
+inline struct rb_tree *new_rb_tree()
 {
   return NULL;
 }
