@@ -473,16 +473,12 @@ int word_tree_for_each_ordered_visitor(int alphabeth_pos, word_tree_t *child,
     return any_not_deleted;
   }
 
-  if(child->deletion_level < params->deletion_level)
-    any_not_deleted = 1;
-
   params->curr_str[pos] = c;
   if(pos + 1 < params->len)
   {
     params->curr_freq[alphabeth_pos]++;
     word_tree_for_each_ordered_helper(child, params, pos + 1);
     params->curr_freq[alphabeth_pos]--;
-    return any_not_deleted;
   }
   else
   {
