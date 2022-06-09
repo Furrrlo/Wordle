@@ -166,9 +166,11 @@ void rb_tree_for_each_ordered(rb_tree_t tree, void (*func)(int, word_tree_t*))
   if(rb_tree_is_empty(tree))
       return;
 
-  rb_tree_for_each_ordered(tree->left, func);
+  if(!rb_tree_is_empty(tree))
+    rb_tree_for_each_ordered(tree->left, func);
   func(tree->key, &tree->value);
-  rb_tree_for_each_ordered(tree->right, func);
+  if(!rb_tree_is_empty(tree))
+    rb_tree_for_each_ordered(tree->right, func);
 }
 
 struct word_tree_node *rb_tree_get(rb_tree_t tree, int key)
