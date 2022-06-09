@@ -10,6 +10,7 @@
 
 // ASCII ordered
 char ALPHABETH[] = "-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
+typedef unsigned char alphabeth_size_t; // 60 < 255, should be enough
 
 static inline char pos_to_char(int pos)
 {
@@ -109,7 +110,7 @@ typedef struct word_tree_node
 
 typedef struct rb_tree
 {
-  unsigned char key; // 60 < 255, should be enough
+  alphabeth_size_t key;
   struct word_tree_node value;
 
   unsigned long _parent_color; 
@@ -555,13 +556,75 @@ void populate_freq(char *word, int len, int new_freq[ALPHABETH_SIZE])
     new_freq[char_to_pos(word[i])]++;
 }
 
-typedef struct {
+typedef struct
+{
+  alphabeth_size_t alphabeth_pos;
+  unsigned short n;
+} char_freq_t; 
+
+typedef struct
+{
+  char_freq_t arr[ALPHABETH_SIZE];
+  char_freq_t lookup;
+  int size;
+} char_freqs_t;
+
+int freq_compare(const void *o1, const void *o2) {
+  return (((char_freq_t*) o1)->alphabeth_pos - ((char_freq_t*) o2)->alphabeth_pos);
+}
+
+unsigned short freq_find_by_pos(char_freqs_t *freq, alphabeth_size_t alphabeth_pos)
+{
+  freq->lookup.alphabeth_pos = alphabeth_pos;
+  char_freq_t *found = (char_freq_t*) bsearch(
+      &alphabeth_pos, 
+      freq->arr, 
+      freq->size, 
+      sizeof(char_freq_t), 
+      freq_compare); 
+  return found ? found->n : 0;
+}
+
+#define freq_update_for_pos(freq, alphabeth_pos, to_update, body) { \
+      int ____requires_sorting____;\
+      unsigned short *to_update = __freq_to_update_for_pos(freq, alphabeth_pos, &____requires_sorting____); \
+      { body } \
+      if(____requires_sorting____)\
+        qsort((freq)->arr, (freq)->size, sizeof(char_freq_t), freq_compare); \
+    }
+
+unsigned short *__freq_to_update_for_pos(char_freqs_t *freq, 
+                                         alphabeth_size_t alphabeth_pos,
+                                         int *requires_sorting)
+{
+  freq->lookup.alphabeth_pos = alphabeth_pos;
+  char_freq_t *found = (char_freq_t*) bsearch(
+      &freq->lookup,
+      freq->arr,
+      freq->size,
+      sizeof(char_freq_t),
+      freq_compare);
+  if(found)
+  {
+    *requires_sorting = 0;
+    return &found->n;
+  }
+
+  char_freq_t *new = &freq->arr[freq->size++];
+  new->alphabeth_pos = alphabeth_pos;
+  new->n = 0;
+  *requires_sorting = 1;
+  return &new->n;
+}
+
+typedef struct
+{
   char *word;
   int len;
   int freq[ALPHABETH_SIZE];
   char *found_chars;
   char **found_not_chars;
-  int found_freq_min[ALPHABETH_SIZE];
+  char_freqs_t found_freq_min;
   int found_freq_max[ALPHABETH_SIZE];
 } reference_t;
 
@@ -580,7 +643,7 @@ void init_ref(reference_t *ref, char *word, int len)
     ref->found_not_chars[i][0] = '\0';
   }
 
-  memset(ref->found_freq_min, 0, sizeof(ref->found_freq_min));
+  ref->found_freq_min.size = 0;
   memset(ref->found_freq_max, -1, sizeof(ref->found_freq_max));
 }
 
@@ -606,9 +669,9 @@ void print_found_ref(reference_t *ref)
   printf("}\n");
 
   printf("min freq: {");
-  for(int i = 0; i < ALPHABETH_SIZE; ++i)
-    if(ref->found_freq_min[i] > 0)
-     printf("'%c': %d, ", pos_to_char(i), ref->found_freq_min[i]);
+  for(int i = 0; i < ref->found_freq_min.size; ++i)
+    if(ref->found_freq_min.arr[i].n > 0)
+     printf("'%c': %d, ", pos_to_char(ref->found_freq_min.arr[i].alphabeth_pos), ref->found_freq_min.arr[i].n);
   printf("}\n");
   
   printf("max freq: {");
@@ -644,12 +707,14 @@ int compare_words(reference_t *ref, char *new, char *out)
     int pos = char_to_pos(new[i]);
     --new_freq[pos];
 
-    int min_ref = ref->freq[pos] - new_freq[pos]; 
-    if(min_ref > ref->found_freq_min[pos])
-    {
-      ref->found_freq_min[pos] = min_ref;
-      anything_changed = 1;
-    }
+    int min_freq = ref->freq[pos] - new_freq[pos];
+    freq_update_for_pos(&ref->found_freq_min, pos, saved_min_freq, {
+      if(min_freq > *saved_min_freq)
+      {
+        *saved_min_freq = min_freq;
+        anything_changed = 1;
+      }
+    });
   }
 
   // Second pass, letters which are wrong or at the wrong place
@@ -679,11 +744,13 @@ int compare_words(reference_t *ref, char *new, char *out)
       --new_freq[pos];
 
       int min_freq = ref->freq[pos] - new_freq[pos];
-      if(min_freq > ref->found_freq_min[pos])
-      {
-        ref->found_freq_min[pos] = min_freq;
-        anything_changed = 1;
-      }
+      freq_update_for_pos(&ref->found_freq_min, pos, saved_min_freq, {
+        if(min_freq > *saved_min_freq)
+        {
+          *saved_min_freq = min_freq;
+          anything_changed = 1;
+        }
+      });
     }
 
     if(found_not_char)
@@ -733,9 +800,10 @@ int known_chars_filter(reference_t *ref, int pos, char c, int alphabeth_pos, int
 
 int words_filter(reference_t *ref, char *str, int *freq)
 {
-  for(int i = 0; i < ALPHABETH_SIZE; ++i)
+  for(int i = 0; i < ref->found_freq_min.size; ++i)
   {
-    if(freq[i] < ref->found_freq_min[i])
+    char_freq_t *min_freq = &ref->found_freq_min.arr[i];
+    if(freq[min_freq->alphabeth_pos] < min_freq->n)
       return MARK_DELETED;
   }
   
