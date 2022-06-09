@@ -435,55 +435,80 @@ int word_tree_push(word_tree_t *tree, char *str)
   return res;
 }
 
+struct word_tree_for_each_params 
+{
+  int len; 
+  int deletion_level; 
+  char *hint;
+  
+  char *curr_str; 
+  int curr_freq[ALPHABETH_SIZE];
+
+  int (*filter)(int, char, int, int);
+  int (*word_func)(char*, int*);
+};
+
 void word_tree_for_each_ordered_helper(word_tree_t *tree, 
-                                       int pos, int len, int deletion_level, char *hint, 
-                                       char *str, int freq[ALPHABETH_SIZE], 
-                                       int (*filter)(int, char, int),
-                                       int (*func)(char*, int*))
+                                       struct word_tree_for_each_params *params, 
+                                       int pos);
+
+int word_tree_for_each_ordered_visitor(int alphabeth_pos, word_tree_t *child, 
+                                       int any_not_deleted,
+                                       struct word_tree_for_each_params *params, 
+                                       int pos)
+{
+  if(child->deletion_level >= params->deletion_level)
+    return any_not_deleted;
+
+  char c = pos_to_char(alphabeth_pos);
+  int filter_res = params->filter(pos, c, alphabeth_pos, params->curr_freq[alphabeth_pos] + 1);
+  if(filter_res == SKIP_SUBTREE)
+    return any_not_deleted;
+
+  if(filter_res == MARK_DELETED)
+  {
+    child->deletion_level = params->deletion_level;
+    return any_not_deleted;
+  }
+
+  if(child->deletion_level < params->deletion_level)
+    any_not_deleted = 1;
+
+  params->curr_str[pos] = c;
+  if(pos + 1 < params->len)
+  {
+    params->curr_freq[alphabeth_pos]++;
+    word_tree_for_each_ordered_helper(child, params, pos + 1);
+    params->curr_freq[alphabeth_pos]--;
+    return any_not_deleted;
+  }
+  else
+  {
+    params->curr_freq[alphabeth_pos]++;
+    if(params->word_func(params->curr_str, params->curr_freq) == MARK_DELETED)
+      child->deletion_level = params->deletion_level;
+    params->curr_freq[alphabeth_pos]--;
+  }
+
+  if(child->deletion_level < params->deletion_level)
+    any_not_deleted = 1;
+
+  return any_not_deleted;
+}
+
+void word_tree_for_each_ordered_helper(word_tree_t *tree, 
+                                       struct word_tree_for_each_params *params, 
+                                       int pos)
 {
   int any_not_deleted = 0;
   void (*visit_func)(int, word_tree_t*) = LAMBDA(void, (int i, word_tree_t *child) {
-    if(child->deletion_level >= deletion_level)
-      return;
-
-    char c = pos_to_char(i);
-    int filter_res = filter(pos, c, freq[i] + 1);
-    if(filter_res == SKIP_SUBTREE)
-      return;
-
-    if(filter_res == MARK_DELETED)
-    {
-      child->deletion_level = deletion_level;
-      return; 
-    }
-
-    if(child->deletion_level < deletion_level)
-      any_not_deleted = 1;
-
-    str[pos] = c;
-    if(pos + 1 < len)
-    {
-      freq[i]++;
-      word_tree_for_each_ordered_helper(child, pos + 1, len, 
-          deletion_level, hint, str, freq, filter, func);
-      freq[i]--;
-      return;
-    }
-    else
-    {
-      freq[i]++;
-      if(func(str, freq) == MARK_DELETED)
-        child->deletion_level = deletion_level;
-      freq[i]--;
-    }
-
-    if(child->deletion_level < deletion_level)
-      any_not_deleted = 1;
+    any_not_deleted = word_tree_for_each_ordered_visitor(
+        i, child, any_not_deleted, params, pos);
   });
 
-  if(hint != NULL && hint[pos] != 0)
+  if(params->hint != NULL && params->hint[pos] != 0)
   {
-    int hint_pos = char_to_pos(hint[pos]);
+    int hint_pos = char_to_pos(params->hint[pos]);
     word_tree_t *child = rb_tree_get(tree->children, hint_pos);
     if(child != NULL)
       visit_func(hint_pos, child);
@@ -494,18 +519,28 @@ void word_tree_for_each_ordered_helper(word_tree_t *tree,
   }
 
   if(!any_not_deleted)
-    tree->deletion_level = deletion_level;
+    tree->deletion_level = params->deletion_level;
 }
 
 void word_tree_for_each_ordered(word_tree_t *tree, 
                                 int len, char *hint,
-                                int (*filter)(int, char, int), 
-                                int (*func)(char*, int*))
+                                int (*filter)(int, char, int, int), 
+                                int (*word_func)(char*, int*))
 {
+  struct word_tree_for_each_params params;
+  params.len = len;
+  params.deletion_level = tree->deletion_level;
+  params.hint = hint;
+
   char word[len + 1];
   word[len] = '\0';
-  int freq[ALPHABETH_SIZE] = {0};
-  word_tree_for_each_ordered_helper(tree, 0, len, tree->deletion_level, hint, word, freq, filter, func);
+  params.curr_str = word; 
+  memset(params.curr_freq, 0, sizeof(params.curr_freq));
+
+  params.filter = filter;
+  params.word_func = word_func;
+
+  word_tree_for_each_ordered_helper(tree, &params, 0);
 }
 
 void word_tree_undelete_all(word_tree_t *tree)
