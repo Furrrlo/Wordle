@@ -112,8 +112,7 @@ typedef struct rb_tree
   unsigned char key; // 60 < 255, should be enough
   struct word_tree_node value;
 
-  unsigned char color;
-  struct rb_tree *parent; 
+  unsigned long _parent_color; 
   struct rb_tree *right;
   struct rb_tree *left;
 } *rb_tree_t;
@@ -137,9 +136,29 @@ void rb_tree_free(rb_tree_t tree)
   // free(tree);
 }
 
-int rb_tree_is_empty(rb_tree_t tree)
+inline int rb_tree_is_empty(rb_tree_t tree)
 {
   return tree == NULL;
+}
+
+inline struct rb_tree *rb_tree_parent(struct rb_tree *node)
+{
+  return (struct rb_tree*) (node->_parent_color & ~3); 
+}
+
+inline unsigned char rb_tree_color(struct rb_tree *node)
+{
+  return node->_parent_color & 3; 
+}
+
+inline void rb_tree_set_parent(struct rb_tree *node, struct rb_tree *parent)
+{
+  node->_parent_color = (unsigned long) parent | rb_tree_color(node);
+}
+
+inline void rb_tree_set_color(struct rb_tree *node, unsigned char color)
+{
+  node->_parent_color = (node->_parent_color & ~3) | (color & 3);
 }
 
 void rb_tree_for_each_ordered(rb_tree_t tree, void (*func)(int, word_tree_t*))
@@ -180,13 +199,13 @@ struct rb_tree *rb_tree_bst(rb_tree_t *tree, struct rb_tree *node, int allow_dup
   {
     struct rb_tree *res = rb_tree_bst(&(*tree)->left, node, allow_duplicates);
     if(res == NULL)
-      (*tree)->left->parent = *tree;
+      rb_tree_set_parent((*tree)->left, *tree);
     return res;
   }
   
   struct rb_tree *res = rb_tree_bst(&(*tree)->right, node, allow_duplicates);
   if(res == NULL)
-    (*tree)->right->parent = *tree;
+    rb_tree_set_parent((*tree)->right, *tree);
   return res;
 }
 
@@ -195,16 +214,16 @@ void rb_tree_rrotate(rb_tree_t *tree, struct rb_tree *node)
     struct rb_tree *left = node->left;
     node->left = left->right;
     if(node->left)
-      node->left->parent = node;
-    left->parent = node->parent;
-    if (!node->parent)
+      rb_tree_set_parent(node->left, node);
+    rb_tree_set_parent(left, rb_tree_parent(node));
+    if (!rb_tree_parent(node))
       *tree = left;
-    else if (node == node->parent->left)
-      node->parent->left = left;
+    else if (node == rb_tree_parent(node)->left)
+      rb_tree_parent(node)->left = left;
     else
-      node->parent->right = left;
+      rb_tree_parent(node)->right = left;
     left->right = node;
-    node->parent = left;
+    rb_tree_set_parent(node, left);
 }
 
 void rb_tree_lrotate(rb_tree_t *tree, struct rb_tree *node)
@@ -212,16 +231,16 @@ void rb_tree_lrotate(rb_tree_t *tree, struct rb_tree *node)
     struct rb_tree *right = node->right;
     node->right = right->left;
     if(node->right)
-      node->right->parent = node;
-    right->parent = node->parent;
-    if(!node->parent)
+      rb_tree_set_parent(node->right, node);
+    rb_tree_set_parent(right, rb_tree_parent(node));
+    if(!rb_tree_parent(node))
       *tree = right;
-    else if (node == node->parent->left)
-      node->parent->left = right;
+    else if (node == rb_tree_parent(node)->left)
+      rb_tree_parent(node)->left = right;
     else
-      node->parent->right = right;
+      rb_tree_parent(node)->right = right;
     right->left = node;
-    node->parent = right;
+    rb_tree_set_parent(node, right);
 }
 
 void rb_tree_fixup(rb_tree_t *tree, struct rb_tree *node)
@@ -230,36 +249,36 @@ void rb_tree_fixup(rb_tree_t *tree, struct rb_tree *node)
   struct rb_tree *parent = NULL;
   struct rb_tree *grand_parent = NULL;
 
-  while(node != root && node->color != BLACK && node->parent->color == RED)
+  while(node != root && rb_tree_color(node) != BLACK && rb_tree_color(rb_tree_parent(node)) == RED)
   {
-    parent = node->parent;
-    grand_parent = node->parent->parent;
+    parent = rb_tree_parent(node);
+    grand_parent = rb_tree_parent(parent);
 
     if(parent == grand_parent->left)
     {
       struct rb_tree *uncle = grand_parent->right;
 
-      if(uncle != NULL && uncle->color == RED)
+      if(uncle != NULL && rb_tree_color(uncle) == RED)
       {
-        grand_parent->color = RED;
-        parent->color = BLACK;
-        uncle->color = BLACK;
+        rb_tree_set_color(grand_parent, RED);
+        rb_tree_set_color(parent, BLACK);
+        rb_tree_set_color(uncle, BLACK);
         node = grand_parent;
         continue;
       }
 
-      // uncle == NULL || uncle->color == BLACK
+      // uncle == NULL || rb_tree_color(uncle) == BLACK
       if(node == parent->right)
       {
         rb_tree_lrotate(tree, parent);
         node = parent;
-        parent = node->parent;
+        parent = rb_tree_parent(node);
       }
 
       rb_tree_rrotate(tree, grand_parent);
-      int tmp = parent->color;
-      parent->color = grand_parent->color;
-      grand_parent->color = tmp;
+      int tmp = rb_tree_color(parent);
+      rb_tree_set_color(parent, rb_tree_color(grand_parent));
+      rb_tree_set_color(grand_parent, tmp);
       node = parent;
       continue;
     }
@@ -267,31 +286,31 @@ void rb_tree_fixup(rb_tree_t *tree, struct rb_tree *node)
     // parent == grand_parent->right
     struct rb_tree *uncle = grand_parent->left;
 
-    if(uncle != NULL && uncle->color == RED)
+    if(uncle != NULL && rb_tree_color(uncle) == RED)
     {
-      grand_parent->color = RED;
-      parent->color = BLACK;
-      uncle->color = BLACK;
+      rb_tree_set_color(grand_parent, RED);
+      rb_tree_set_color(parent, BLACK);
+      rb_tree_set_color(uncle, BLACK);
       node = grand_parent;
       continue;
     }
      
-    // uncle == NULL || uncle->color == BLACK 
+    // uncle == NULL || rb_tree_color(uncle) == BLACK 
     if(node == parent->left)
     {
       rb_tree_rrotate(tree, parent);
       node = parent;
-      parent = node->parent;
+      parent = rb_tree_parent(node);
     }
 
     rb_tree_lrotate(tree, grand_parent);
-    int tmp = parent->color;
-    parent->color = grand_parent->color;
-    grand_parent->color = tmp;
+    int tmp = rb_tree_color(parent);
+    rb_tree_set_color(parent, rb_tree_color(grand_parent));
+    rb_tree_set_color(grand_parent, tmp);
     node = parent;
   }
 
-  root->color = BLACK;
+  rb_tree_set_color(root, BLACK);
 }
 
 struct word_tree_node *rb_tree_do_put(rb_tree_t *tree, int key, int allow_duplicates)
@@ -317,10 +336,10 @@ struct word_tree_node *rb_tree_do_put(rb_tree_t *tree, int key, int allow_duplic
   new_node->key = key;
   new_node->value.children = new_rb_tree();
   new_node->value.deletion_level = 0;
-  new_node->color = RED;
+  rb_tree_set_color(new_node, RED);
   new_node->right = NULL;
   new_node->left = NULL;
-  new_node->parent = NULL;
+  rb_tree_set_parent(new_node, NULL);
 
   struct rb_tree *already_present = rb_tree_bst(tree, new_node, allow_duplicates);
   if(already_present != NULL)
