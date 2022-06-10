@@ -12,12 +12,12 @@
 char ALPHABETH[] = "-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
 typedef unsigned char alphabeth_size_t; // 60 < 255, should be enough
 
-static inline char pos_to_char(int pos)
+static inline char pos_to_char(const int pos)
 {
   return ALPHABETH[pos];
 }
 
-int char_to_pos(char c)
+static int char_to_pos(const char c)
 {
   // Valgrind says this is a hot method :I
   // I need that jump-table performance
@@ -116,17 +116,17 @@ typedef struct rb_tree
   unsigned long _parent_color; 
   struct rb_tree *right;
   struct rb_tree *left;
-} *rb_tree_t;
+} rb_tree_t;
 
 struct rb_tree global_rb_tree_nodes[8192 * 250];
 int global_rb_tree_nodes_cursor = 0;
 
-static inline struct rb_tree *new_rb_tree()
+static inline rb_tree_t *new_rb_tree()
 {
   return NULL;
 }
 
-void rb_tree_free(rb_tree_t tree)
+static inline void rb_tree_free(rb_tree_t *tree)
 {
   if(tree == NULL)
     return;
@@ -137,32 +137,32 @@ void rb_tree_free(rb_tree_t tree)
   // free(tree);
 }
 
-static inline int rb_tree_is_empty(rb_tree_t tree)
+static inline int rb_tree_is_empty(const rb_tree_t *const tree)
 {
   return tree == NULL;
 }
 
-static inline struct rb_tree *rb_tree_parent(struct rb_tree *node)
+static inline struct rb_tree *rb_tree_parent(const struct rb_tree *node)
 {
   return (struct rb_tree*) (node->_parent_color & ~3); 
 }
 
-static inline unsigned char rb_tree_color(struct rb_tree *node)
+static inline unsigned char rb_tree_color(const struct rb_tree *const node)
 {
   return node->_parent_color & 3; 
 }
 
-static inline void rb_tree_set_parent(struct rb_tree *node, struct rb_tree *parent)
+static inline void rb_tree_set_parent(struct rb_tree *const node, const struct rb_tree *const parent)
 {
   node->_parent_color = (unsigned long) parent | rb_tree_color(node);
 }
 
-static inline void rb_tree_set_color(struct rb_tree *node, unsigned char color)
+static inline void rb_tree_set_color(struct rb_tree *const node, const unsigned char color)
 {
   node->_parent_color = (node->_parent_color & ~3) | (color & 3);
 }
 
-void rb_tree_for_each_ordered(rb_tree_t tree, void (*func)(int, word_tree_t*))
+static void rb_tree_for_each_ordered(rb_tree_t *const tree, void (*func)(int, word_tree_t *))
 {
   if(rb_tree_is_empty(tree))
       return;
@@ -174,20 +174,20 @@ void rb_tree_for_each_ordered(rb_tree_t tree, void (*func)(int, word_tree_t*))
     rb_tree_for_each_ordered(tree->right, func);
 }
 
-struct word_tree_node *rb_tree_get(rb_tree_t tree, int key)
+static struct word_tree_node *rb_tree_get(const rb_tree_t *const tree, const int key)
 {
   if(rb_tree_is_empty(tree))
     return NULL;
 
   if(tree->key == key)
-    return &tree->value;
+    return (struct word_tree_node*) &tree->value;
 
   if(key < tree->key)
     return rb_tree_get(tree->left, key);
   return rb_tree_get(tree->right, key);
 }
 
-struct rb_tree *rb_tree_bst(rb_tree_t *tree, struct rb_tree *node, int allow_duplicates)
+static struct rb_tree *rb_tree_bst(rb_tree_t **const tree, struct rb_tree *const node, const int allow_duplicates)
 {
   if(rb_tree_is_empty(*tree))
   {
@@ -212,7 +212,7 @@ struct rb_tree *rb_tree_bst(rb_tree_t *tree, struct rb_tree *node, int allow_dup
   return res;
 }
 
-void rb_tree_rrotate(rb_tree_t *tree, struct rb_tree *node)
+static void rb_tree_rrotate(rb_tree_t **const tree, struct rb_tree *const node)
 {
     struct rb_tree *left = node->left;
     node->left = left->right;
@@ -229,7 +229,7 @@ void rb_tree_rrotate(rb_tree_t *tree, struct rb_tree *node)
     rb_tree_set_parent(node, left);
 }
 
-void rb_tree_lrotate(rb_tree_t *tree, struct rb_tree *node)
+static void rb_tree_lrotate(rb_tree_t **const tree, struct rb_tree *const node)
 {
     struct rb_tree *right = node->right;
     node->right = right->left;
@@ -246,9 +246,9 @@ void rb_tree_lrotate(rb_tree_t *tree, struct rb_tree *node)
     rb_tree_set_parent(node, right);
 }
 
-void rb_tree_fixup(rb_tree_t *tree, struct rb_tree *node)
+static void rb_tree_fixup(rb_tree_t **const tree, struct rb_tree *node)
 {
-  struct rb_tree *root = *tree;
+  struct rb_tree *const root = *tree;
   struct rb_tree *parent = NULL;
   struct rb_tree *grand_parent = NULL;
 
@@ -316,9 +316,9 @@ void rb_tree_fixup(rb_tree_t *tree, struct rb_tree *node)
   rb_tree_set_color(root, BLACK);
 }
 
-struct word_tree_node *rb_tree_do_put(rb_tree_t *tree, int key, int allow_duplicates)
+static struct word_tree_node *rb_tree_do_put(rb_tree_t **const tree, const int key, const int allow_duplicates)
 {
-  // struct rb_tree *new_node = (struct rb_tree*) malloc(sizeof(struct rb_tree));
+  // struct rb_tree *new_node = malloc(sizeof(*new_node));
   if(global_rb_tree_nodes_cursor >= sizeof(global_rb_tree_nodes) / sizeof(struct rb_tree))
   {
     printf("No more rb_tree nodes\n");
@@ -356,19 +356,19 @@ struct word_tree_node *rb_tree_do_put(rb_tree_t *tree, int key, int allow_duplic
   return &new_node->value;
 }
 
-struct word_tree_node *rb_tree_put(rb_tree_t *tree, int key)
+static inline struct word_tree_node *rb_tree_put(rb_tree_t **const tree, const int key)
 {
   return rb_tree_do_put(tree, key, 1);
 }
 
-struct word_tree_node *rb_tree_put_if_absent(rb_tree_t *tree, int key)
+static inline struct word_tree_node *rb_tree_put_if_absent(rb_tree_t **const tree, const int key)
 {
   return rb_tree_do_put(tree, key, 0);
 }
 
-word_tree_t *new_word_tree()
+static inline word_tree_t *new_word_tree()
 {
-  word_tree_t *ref = (word_tree_t*) malloc(sizeof(word_tree_t));
+  word_tree_t *ref = malloc(sizeof(*ref));
 #ifdef DEBUG
   if(ref == NULL)
   {
@@ -383,7 +383,7 @@ word_tree_t *new_word_tree()
   return ref;
 }
 
-void word_tree_free(word_tree_t *tree)
+static inline void word_tree_free(word_tree_t *tree)
 {
   if(tree == NULL)
     return;
@@ -393,7 +393,7 @@ void word_tree_free(word_tree_t *tree)
 }
 
 /* O(len) */
-int word_tree_contains(const word_tree_t *tree, char *str)
+static int word_tree_contains(const word_tree_t *const tree, const char *const str)
 {
   const word_tree_t *subtree = tree;
   for(int i = 0; str[i]; ++i)
@@ -408,12 +408,7 @@ int word_tree_contains(const word_tree_t *tree, char *str)
   return 1;
 }
 
-#define VISIT_SUBTREE 1
-#define SKIP_SUBTREE 2
-#define MARK_KEPT 3
-#define MARK_DELETED 4
-
-int word_tree_push_helper(word_tree_t *tree, char *str, int i)
+static int word_tree_push_helper(word_tree_t *const tree, const char *const str, const int i)
 {
   if(!str[i])
     return 1;
@@ -429,7 +424,7 @@ int word_tree_push_helper(word_tree_t *tree, char *str, int i)
   return res;
 }
 
-int word_tree_push(word_tree_t *tree, char *str)
+static inline int word_tree_push(word_tree_t *const tree, const char *const str)
 {
   int root_deletion_level = tree->deletion_level;
   int res = word_tree_push_helper(tree, str, 0);
@@ -438,11 +433,16 @@ int word_tree_push(word_tree_t *tree, char *str)
   return res;
 }
 
+#define VISIT_SUBTREE 1
+#define SKIP_SUBTREE 2
+#define MARK_KEPT 3
+#define MARK_DELETED 4
+
 struct word_tree_for_each_params 
 {
   int len; 
   int deletion_level; 
-  char *hint;
+  const char *hint;
   
   char *curr_str; 
   int curr_freq[ALPHABETH_SIZE];
@@ -451,14 +451,17 @@ struct word_tree_for_each_params
   int (*word_func)(char*, int*);
 };
 
-void word_tree_for_each_ordered_helper(word_tree_t *tree, 
-                                       struct word_tree_for_each_params *params, 
-                                       int pos);
+static 
+void word_tree_for_each_ordered_helper(word_tree_t *const, 
+                                       struct word_tree_for_each_params *const, 
+                                       const int pos);
 
-int word_tree_for_each_ordered_visitor(int alphabeth_pos, word_tree_t *child, 
+static
+int word_tree_for_each_ordered_visitor(const int alphabeth_pos, 
+                                       word_tree_t *const child, 
                                        int any_not_deleted,
-                                       struct word_tree_for_each_params *params, 
-                                       int pos)
+                                       struct word_tree_for_each_params *const params, 
+                                       const int pos)
 {
   if(child->deletion_level >= params->deletion_level)
     return any_not_deleted;
@@ -495,9 +498,10 @@ int word_tree_for_each_ordered_visitor(int alphabeth_pos, word_tree_t *child,
   return any_not_deleted;
 }
 
-void word_tree_for_each_ordered_helper(word_tree_t *tree, 
-                                       struct word_tree_for_each_params *params, 
-                                       int pos)
+static
+void word_tree_for_each_ordered_helper(word_tree_t *const tree, 
+                                       struct word_tree_for_each_params *const params, 
+                                       const int pos)
 {
   int any_not_deleted = 0;
   void (*visit_func)(int, word_tree_t*) = LAMBDA(void, (int i, word_tree_t *child) {
@@ -521,8 +525,9 @@ void word_tree_for_each_ordered_helper(word_tree_t *tree,
     tree->deletion_level = params->deletion_level;
 }
 
-void word_tree_for_each_ordered(word_tree_t *tree, 
-                                int len, char *hint,
+static inline
+void word_tree_for_each_ordered(word_tree_t *const tree, 
+                                const int len, const char *const hint,
                                 int (*filter)(int, char, int, int), 
                                 int (*word_func)(char*, int*))
 {
@@ -542,16 +547,18 @@ void word_tree_for_each_ordered(word_tree_t *tree,
   word_tree_for_each_ordered_helper(tree, &params, 0);
 }
 
-void word_tree_undelete_all(word_tree_t *tree)
+static inline void word_tree_undelete_all(word_tree_t *const tree)
 {
   tree->deletion_level++;
 }
 
 // Time - Theta(n)
-void populate_freq(char *word, int len, int new_freq[ALPHABETH_SIZE])
+static void populate_freq(const char *const word, 
+                          const int len, 
+                          int new_freq[ALPHABETH_SIZE])
 {
   // Populate frequencies of the word we were just given
-  memset(new_freq, 0, ALPHABETH_SIZE * sizeof(int));
+  memset(new_freq, 0, ALPHABETH_SIZE * sizeof(new_freq[0]));
   for(int i = 0; i < len; ++i)
     new_freq[char_to_pos(word[i])]++;
 }
@@ -565,19 +572,20 @@ typedef struct
 typedef struct
 {
   char_freq_t arr[ALPHABETH_SIZE];
-  char_freq_t lookup;
   int size;
 } char_freqs_t;
 
-int freq_compare(const void *o1, const void *o2) {
+static inline int freq_compare(const void *o1, const void *o2) {
   return (((char_freq_t*) o1)->alphabeth_pos - ((char_freq_t*) o2)->alphabeth_pos);
 }
 
-unsigned short freq_find_by_pos(char_freqs_t *freq, alphabeth_size_t alphabeth_pos)
+static inline
+unsigned short freq_find_by_pos(const char_freqs_t *const freq, 
+                                const alphabeth_size_t alphabeth_pos)
 {
-  freq->lookup.alphabeth_pos = alphabeth_pos;
+  const char_freq_t lookup = { .alphabeth_pos = alphabeth_pos };
   char_freq_t *found = (char_freq_t*) bsearch(
-      &alphabeth_pos, 
+      &lookup, 
       freq->arr, 
       freq->size, 
       sizeof(char_freq_t), 
@@ -593,13 +601,14 @@ unsigned short freq_find_by_pos(char_freqs_t *freq, alphabeth_size_t alphabeth_p
         qsort((freq)->arr, (freq)->size, sizeof(char_freq_t), freq_compare); \
     }
 
-unsigned short *__freq_to_update_for_pos(char_freqs_t *freq, 
-                                         alphabeth_size_t alphabeth_pos,
-                                         int *requires_sorting)
+static
+unsigned short *__freq_to_update_for_pos(char_freqs_t *const freq, 
+                                         const alphabeth_size_t alphabeth_pos,
+                                         int *const requires_sorting)
 {
-  freq->lookup.alphabeth_pos = alphabeth_pos;
+  const char_freq_t lookup = { .alphabeth_pos = alphabeth_pos };
   char_freq_t *found = (char_freq_t*) bsearch(
-      &freq->lookup,
+      &lookup,
       freq->arr,
       freq->size,
       sizeof(char_freq_t),
@@ -619,8 +628,8 @@ unsigned short *__freq_to_update_for_pos(char_freqs_t *freq,
 
 typedef struct
 {
-  char *word;
-  int len;
+  const char *word;
+  size_t len;
   int freq[ALPHABETH_SIZE];
   char *found_chars;
   char **found_not_chars;
@@ -628,18 +637,19 @@ typedef struct
   int found_freq_max[ALPHABETH_SIZE];
 } reference_t;
 
-void init_ref(reference_t *ref, char *word, int len)
+static inline 
+void init_ref(reference_t *const ref, const char *const word, const size_t len)
 {
   ref->word = word;
   ref->len = len;
   populate_freq(ref->word, ref->len, ref->freq);
-  ref->found_chars = (char*) malloc(ref->len * sizeof(char));
-  memset(ref->found_chars, 0, ref->len * sizeof(char));
+  ref->found_chars = (char*) malloc(ref->len * sizeof(ref->found_chars[0]));
+  memset(ref->found_chars, 0, ref->len * sizeof(ref->found_chars[0]));
 
-  ref->found_not_chars = (char**) malloc(ref->len * sizeof(char*));
+  ref->found_not_chars = (char**) malloc(ref->len * sizeof(ref->found_not_chars[0]));
   for(int i = 0; i < ref->len; i++)
   {
-    ref->found_not_chars[i] = (char*) malloc((ALPHABETH_SIZE + 1) * sizeof(char));
+    ref->found_not_chars[i] = (char*) malloc((ALPHABETH_SIZE + 1) * sizeof(ref->found_not_chars[0][0]));
     ref->found_not_chars[i][0] = '\0';
   }
 
@@ -647,7 +657,7 @@ void init_ref(reference_t *ref, char *word, int len)
   memset(ref->found_freq_max, -1, sizeof(ref->found_freq_max));
 }
 
-void ref_dispose(reference_t *ref)
+static inline void ref_dispose(reference_t *ref)
 {
   free(ref->found_chars);
   for(int i = 0; i < ref->len; ++i)
@@ -655,7 +665,7 @@ void ref_dispose(reference_t *ref)
   free(ref->found_not_chars);
 }
 
-void print_found_ref(reference_t *ref)
+void print_found_ref(const reference_t *const ref)
 {
   printf("letters: \"");
   for(int i = 0; i < ref->len; ++i)
@@ -682,11 +692,13 @@ void print_found_ref(reference_t *ref)
 }
 
 /* Time - Theta(n) */
-int compare_words(reference_t *ref, char *new, char *out)
+static int compare_words(reference_t *const ref, 
+                         const char *const new, 
+                         char *const out)
 {
   // Spatial - Stack allocated, constant
   // Time - Theta(n)
-  int new_freq[ALPHABETH_SIZE] = {0};
+  int new_freq[ALPHABETH_SIZE];
   memcpy(new_freq, ref->freq, sizeof(new_freq));
 
   int anything_changed = 0;
@@ -781,7 +793,11 @@ int compare_words(reference_t *ref, char *new, char *out)
   return anything_changed;
 }
 
-int known_chars_filter(reference_t *ref, int pos, char c, int alphabeth_pos, int char_freq)
+static int known_chars_filter(const reference_t *const ref,
+                              const int pos, 
+                              const char c, 
+                              const int alphabeth_pos, 
+                              const int char_freq)
 {
   if(ref->found_not_chars[pos])
   {
@@ -798,11 +814,13 @@ int known_chars_filter(reference_t *ref, int pos, char c, int alphabeth_pos, int
   return VISIT_SUBTREE;
 }
 
-int words_filter(reference_t *ref, char *str, int *freq)
+static int words_filter(const reference_t *const ref, 
+                        const char *const str, 
+                        const int *const freq)
 {
   for(int i = 0; i < ref->found_freq_min.size; ++i)
   {
-    char_freq_t *min_freq = &ref->found_freq_min.arr[i];
+    const char_freq_t *min_freq = &ref->found_freq_min.arr[i];
     if(freq[min_freq->alphabeth_pos] < min_freq->n)
       return MARK_DELETED;
   }
@@ -810,7 +828,10 @@ int words_filter(reference_t *ref, char *str, int *freq)
   return MARK_KEPT;
 }
 
-void filter_dictionary(reference_t *ref, word_tree_t *tree, void (*func)(char*))
+static inline
+void filter_dictionary(const reference_t *const ref, 
+                       word_tree_t *const tree, 
+                       void (*func)(char*))
 {
   // O(n)
   word_tree_for_each_ordered(tree, ref->len, ref->found_chars, 
@@ -825,7 +846,9 @@ void filter_dictionary(reference_t *ref, word_tree_t *tree, void (*func)(char*))
       }));
 }
 
-void populate_dictionary(word_tree_t *tree, int len, char *stop_command)
+static void populate_dictionary(word_tree_t *const tree, 
+                                const int len, 
+                                const char *const stop_command)
 {
   char line[MAX(32, len) + 1];
   for(;;)
@@ -853,7 +876,7 @@ void populate_dictionary(word_tree_t *tree, int len, char *stop_command)
   }
 }
 
-void check_everything_allrite()
+static inline void check_everything_allrite()
 {
 #ifdef DEBUG
   int error = 0;
