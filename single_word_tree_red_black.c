@@ -212,6 +212,36 @@ static struct rb_tree *rb_tree_bst(rb_tree_t **const tree, struct rb_tree *const
   return res;
 }
 
+#ifdef DEBUG
+static int rb_tree_is_balanced_helper(const rb_tree_t *const tree, 
+                                      int *const maxh, 
+                                      int *const minh)
+{
+    if(tree == NULL)
+    {
+        *maxh = *minh = 0;
+        return 1;
+    }
+ 
+    int lmxh, lmnh;
+    if(!rb_tree_is_balanced_helper(tree->left, &lmxh, &lmnh))
+        return 0;
+    int rmxh, rmnh;
+    if(!rb_tree_is_balanced_helper(tree->right, &rmxh, &rmnh))
+        return 0;
+ 
+    *maxh = MAX(lmxh, rmxh) + 1;
+    *minh = MIN(lmnh, rmnh) + 1; 
+    return *maxh <= 2 * *minh;
+}
+
+static inline int rb_tree_is_balanced(const rb_tree_t *const tree)
+{
+  int maxh, minh;
+  return rb_tree_is_balanced_helper(tree, &maxh, &minh);
+}
+#endif
+
 static void rb_tree_rrotate(rb_tree_t **const tree, struct rb_tree *const node)
 {
     struct rb_tree *left = node->left;
@@ -248,11 +278,10 @@ static void rb_tree_lrotate(rb_tree_t **const tree, struct rb_tree *const node)
 
 static void rb_tree_fixup(rb_tree_t **const tree, struct rb_tree *node)
 {
-  struct rb_tree *const root = *tree;
   struct rb_tree *parent = NULL;
   struct rb_tree *grand_parent = NULL;
 
-  while(node != root && rb_tree_color(node) != BLACK && rb_tree_color(rb_tree_parent(node)) == RED)
+  while(node != *tree && rb_tree_color(node) != BLACK && rb_tree_color(rb_tree_parent(node)) == RED)
   {
     parent = rb_tree_parent(node);
     grand_parent = rb_tree_parent(parent);
@@ -313,7 +342,14 @@ static void rb_tree_fixup(rb_tree_t **const tree, struct rb_tree *node)
     node = parent;
   }
 
-  rb_tree_set_color(root, BLACK);
+  rb_tree_set_color(*tree, BLACK);
+#ifdef DEBUG
+  if(!rb_tree_is_balanced(*tree))
+  {
+    printf("Tree is not balanced\n");
+    exit(-104);
+  }
+#endif
 }
 
 static struct word_tree_node *rb_tree_do_put(rb_tree_t **const tree, const int key, const int allow_duplicates)
