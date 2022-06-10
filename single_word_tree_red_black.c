@@ -835,6 +835,9 @@ static int known_chars_filter(const reference_t *const ref,
                               const int alphabeth_pos, 
                               const int char_freq)
 {
+  if(ref->found_freq_max[alphabeth_pos] >= 0 && char_freq > ref->found_freq_max[alphabeth_pos])
+    return MARK_DELETED;
+
   if(ref->found_not_chars[pos])
   {
     char *found_not_chars = ref->found_not_chars[pos];
@@ -843,9 +846,6 @@ static int known_chars_filter(const reference_t *const ref,
       if(c == found_not_chars[k])
         return MARK_DELETED;
   }
-
-  if(ref->found_freq_max[alphabeth_pos] >= 0 && char_freq > ref->found_freq_max[alphabeth_pos])
-    return MARK_DELETED;
 
   return VISIT_SUBTREE;
 }
