@@ -8,7 +8,7 @@ Uses gcc specific extensions and bad code in general.
 
 ## Grading
 
-UpTo18 test uses between 163.840 and 204.800 test strings of 5 characters each 
+UpTo18 test uses between 163.840 and 204.800 test strings of 5 characters each, for 15 games 
 (found by tinkering with the array_list size).
 
 In some tests, input is messed up and doesn't respect what's indicated in the requisites, i.e. 
