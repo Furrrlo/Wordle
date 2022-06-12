@@ -659,13 +659,26 @@ void word_tree_for_each_ordered_helper(word_tree_t *const tree,
   if(params->hint != NULL && params->hint[pos] != 0)
   {
     int hint_pos = char_to_pos(params->hint[pos]);
-    word_tree_t *child = rb_tree_get(word_tree_children(tree), hint_pos);
+    word_tree_t *child;
+    if(expanded != NULL && !word_tree_expanded_is_invalidated(expanded))
+    {
+      child = expanded->non_deleted_size == 0 ?
+        NULL :
+        expanded->non_deleted_children[0];
+    }
+    else
+    {
+      child = rb_tree_get(word_tree_children(tree), hint_pos);
+    }
+
     if(child != NULL)
     {
       if(expanded)
         expanded->non_deleted_size = 0;
       visit_func(hint_pos, child);
     }
+    
+    word_tree_invalidate_if_expanded(tree, 0);
   }
   else if(expanded != NULL && !word_tree_expanded_is_invalidated(expanded))
   {
