@@ -430,7 +430,7 @@ static inline word_tree_t *new_word_tree()
 #endif
 
   ref->_children_or_expanded = (unsigned long) new_rb_tree();
-  ref->deletion_level = 0;
+  ref->deletion_level = 1;
   return ref;
 }
 
