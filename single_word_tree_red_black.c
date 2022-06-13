@@ -1103,7 +1103,7 @@ static void populate_dictionary(word_tree_t *const tree,
 #ifdef DEBUG
     if(len != strlen(line))
     {
-      printf("Invalid word length %ld, expected %d for %s\n", strlen(line), len, line);
+      printf("Invalid word length %ld, expected %ld for %s\n", strlen(line), len, line);
       exit(-6);
       return;
     }
