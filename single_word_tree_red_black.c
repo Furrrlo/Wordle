@@ -600,7 +600,7 @@ static bool word_tree_push_helper(word_tree_t *const tree,
     height_hint++;
 
   int size_hint = 1 << height_hint; // pow(2, height_hint)
-  if(size_hint >= 10)
+  if(size_hint >= ALPHABETH_SIZE / 2)
     word_tree_expand(tree);
 
   bool res = word_tree_push_helper(child, str, deletion_level, i + 1);
