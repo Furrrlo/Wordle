@@ -108,8 +108,9 @@ typedef struct word_tree_node
 
 struct expanded_word_tree_node
 {
-  unsigned long _children_invalidate;
+  struct rb_tree *children;
   alphabeth_size_t non_deleted_size;
+  unsigned short non_deleted_deletion_level;
   word_tree_t *non_deleted_children[ALPHABETH_SIZE];
 };
 
@@ -448,20 +449,55 @@ struct expanded_word_tree_node *word_tree_get_expanded(const word_tree_t *const 
 }
 
 static inline 
-int word_tree_expanded_is_invalidated(const struct expanded_word_tree_node *const expanded)
+int word_tree_expanded_is_invalidated(const struct expanded_word_tree_node *const expanded,
+                                      const unsigned char deletion_level)
 {
-  return expanded->_children_invalidate & 3;
+  return expanded->non_deleted_deletion_level < deletion_level;
 }
 
 static inline 
-void word_tree_invalidate_if_expanded(word_tree_t *const node, 
-                                      const unsigned char invalidate)
+void word_tree_set_deletion_level_if_expanded(word_tree_t *const node, 
+                                              const unsigned char deletion_level)
 {
   struct expanded_word_tree_node *expanded = word_tree_get_expanded(node);
   if(expanded == NULL)
     return;
   
-  expanded->_children_invalidate = (expanded->_children_invalidate & ~3) | (invalidate & 3);
+  expanded->non_deleted_deletion_level = deletion_level;
+}
+
+static inline
+void word_tree_undelete_child_if_expanded(word_tree_t *const node,
+                                          const word_tree_t *const child,
+                                          const unsigned char deletion_level)
+{
+  struct expanded_word_tree_node *expanded = word_tree_get_expanded(node);
+  if(expanded == NULL || word_tree_expanded_is_invalidated(expanded, deletion_level))
+    return;
+
+  size_t arr_max_len = sizeof(expanded->non_deleted_children) / sizeof(expanded->non_deleted_children[0]);
+  if(expanded->non_deleted_size >= arr_max_len)
+    return;
+
+  int (*node_pointer_cmp)(const void*, const void*) = LAMBDA(int, (const void *o1, const void *o2) {
+    return (*((word_tree_t**) o1))->alphabeth_pos - (*((word_tree_t**) o2))->alphabeth_pos;
+  });
+
+  word_tree_t *found = bsearch(
+      &child,
+      expanded->non_deleted_children,
+      expanded->non_deleted_size,
+      sizeof(expanded->non_deleted_children[0]),
+      node_pointer_cmp);
+  if(found != NULL)
+    return;
+
+  expanded->non_deleted_children[expanded->non_deleted_size++] = (word_tree_t*) child;
+  qsort(
+      expanded->non_deleted_children,
+      expanded->non_deleted_size,
+      sizeof(expanded->non_deleted_children[0]),
+      node_pointer_cmp);
 }
 
 static inline rb_tree_t *word_tree_children(const word_tree_t *const node)
@@ -469,7 +505,7 @@ static inline rb_tree_t *word_tree_children(const word_tree_t *const node)
   struct expanded_word_tree_node *expanded = word_tree_get_expanded(node); 
   if(expanded == NULL)
     return (rb_tree_t*) (node->_children_or_expanded & ~3); 
-  return (rb_tree_t*) (expanded->_children_invalidate & ~3);
+  return expanded->children;
 }
 
 static inline void word_tree_put_children(word_tree_t *const node,
@@ -481,7 +517,8 @@ static inline void word_tree_put_children(word_tree_t *const node,
     node->_children_or_expanded = (unsigned long) children;
     return;
   }
-  expanded->_children_invalidate = (unsigned long) children | 1;
+
+  expanded->children = (rb_tree_t*) children;
 }
 
 static inline void word_tree_expand(word_tree_t *const node)
@@ -490,8 +527,9 @@ static inline void word_tree_expand(word_tree_t *const node)
     return;
 
   struct expanded_word_tree_node *expanded = malloc(sizeof(*expanded));
-  expanded->_children_invalidate = node->_children_or_expanded | 1;
+  expanded->children = (rb_tree_t*) node->_children_or_expanded;
   expanded->non_deleted_size = 0;
+  expanded->non_deleted_deletion_level = 0;
   node->_children_or_expanded = ((unsigned long) expanded) | 1;
 }
 
@@ -534,7 +572,10 @@ static int word_tree_contains(const word_tree_t *const tree, const char *const s
   return 1;
 }
 
-static int word_tree_push_helper(word_tree_t *const tree, const char *const str, const int i)
+static int word_tree_push_helper(word_tree_t *const tree, 
+                                 const char *const str, 
+                                 const unsigned char deletion_level,
+                                 const int i)
 {
   if(!str[i])
     // Undeletion shouldn't matter if it's already present, 
@@ -555,14 +596,14 @@ static int word_tree_push_helper(word_tree_t *const tree, const char *const str,
     height_hint++;
 
   int size_hint = 1 << height_hint; // pow(2, height_hint)
-  if(size_hint > ALPHABETH_SIZE / 2)
+  if(size_hint >= 10)
     word_tree_expand(tree);
 
-  int res = word_tree_push_helper(child, str, i + 1);
+  int res = word_tree_push_helper(child, str, deletion_level, i + 1);
   if(res)
   {
     tree->deletion_level = 0;
-    word_tree_invalidate_if_expanded(tree, 1);
+    word_tree_undelete_child_if_expanded(tree, child, deletion_level);
   }
   return res;
 }
@@ -570,7 +611,7 @@ static int word_tree_push_helper(word_tree_t *const tree, const char *const str,
 static inline int word_tree_push(word_tree_t *const tree, const char *const str)
 {
   int root_deletion_level = tree->deletion_level;
-  int res = word_tree_push_helper(tree, str, 0);
+  int res = word_tree_push_helper(tree, str, root_deletion_level, 0);
   // Make sure it's not reset to 0
   tree->deletion_level = root_deletion_level;
   return res;
@@ -660,7 +701,7 @@ void word_tree_for_each_ordered_helper(word_tree_t *const tree,
   {
     int hint_pos = char_to_pos(params->hint[pos]);
     word_tree_t *child;
-    if(expanded != NULL && !word_tree_expanded_is_invalidated(expanded))
+    if(expanded != NULL && !word_tree_expanded_is_invalidated(expanded, params->deletion_level))
     {
       child = expanded->non_deleted_size == 0 ?
         NULL :
@@ -678,9 +719,9 @@ void word_tree_for_each_ordered_helper(word_tree_t *const tree,
       visit_func(hint_pos, child);
     }
     
-    word_tree_invalidate_if_expanded(tree, 0);
+    word_tree_set_deletion_level_if_expanded(tree, params->deletion_level);
   }
-  else if(expanded != NULL && !word_tree_expanded_is_invalidated(expanded))
+  else if(expanded != NULL && !word_tree_expanded_is_invalidated(expanded, params->deletion_level))
   {
     int len = expanded->non_deleted_size;
     expanded->non_deleted_size = 0;
@@ -696,7 +737,7 @@ void word_tree_for_each_ordered_helper(word_tree_t *const tree,
     if(expanded)
       expanded->non_deleted_size = 0;
     rb_tree_for_each_ordered(word_tree_children(tree), params->deletion_level, visit_func);
-    word_tree_invalidate_if_expanded(tree, 0);
+    word_tree_set_deletion_level_if_expanded(tree, params->deletion_level);
   }
 
   if(!any_not_deleted)
