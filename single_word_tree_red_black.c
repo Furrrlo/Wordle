@@ -707,11 +707,26 @@ void word_tree_for_each_ordered_helper(word_tree_t *const tree,
   {
     alphabeth_size_t hint_pos = char_to_pos(params->hint[pos]);
     word_tree_t *child;
-    if(expanded != NULL && !word_tree_expanded_is_invalidated(expanded, params->deletion_level))
+    
+    bool is_expanded = expanded != NULL && !word_tree_expanded_is_invalidated(expanded, params->deletion_level);
+    if(is_expanded && expanded->non_deleted_size <= 1)
     {
-      child = expanded->non_deleted_size == 0 ?
-        NULL :
-        expanded->non_deleted_children[0];
+      child = expanded->non_deleted_size == 0 ? NULL :
+        expanded->non_deleted_children[0]->alphabeth_pos != hint_pos ? NULL :
+          expanded->non_deleted_children[0]; 
+    }
+    else if(is_expanded)
+    {
+      word_tree_t lookup = { .alphabeth_pos = hint_pos };
+      word_tree_t *lookup_ptr = &lookup;
+      child = bsearch(
+          &lookup_ptr,
+          expanded->non_deleted_children,
+          expanded->non_deleted_size,
+          sizeof(expanded->non_deleted_children[0]),
+          LAMBDA(int, (const void* o1, const void* o2) {
+            return (*((word_tree_t**) o1))->alphabeth_pos - (*((word_tree_t**) o2))->alphabeth_pos;
+          }));
     }
     else
     {
