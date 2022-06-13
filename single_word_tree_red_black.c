@@ -866,13 +866,31 @@ unsigned short *__freq_to_update_for_pos(char_freqs_t *const freq,
   return &new->n;
 }
 
+#define BITSET_SIZE(size) (((size) + 7) / 8)
+typedef unsigned char bitset_t;
+
+static inline
+void bitset_set(bitset_t bitset[], size_t pos, bool val)
+{
+  if(val)
+    bitset[pos / 8] |= (1 << (pos % 8));
+  else
+    bitset[pos / 8] &= ~(1 << (pos % 8));
+}
+
+static inline
+bool bitset_test(bitset_t bitset[], size_t pos)
+{
+  return (bitset[pos / 8] & (1 << (pos % 8)));
+}
+
 typedef struct
 {
   const char *word;
   size_t len;
   int freq[ALPHABETH_SIZE];
   char *found_chars;
-  char **found_not_chars;
+  bitset_t (*found_not_chars)[BITSET_SIZE(ALPHABETH_SIZE)];
   char_freqs_t found_freq_min;
   int found_freq_max[ALPHABETH_SIZE];
 } reference_t;
@@ -883,16 +901,8 @@ void init_ref(reference_t *const ref, const char *const word, const size_t len)
   ref->word = word;
   ref->len = len;
   populate_freq(ref->word, ref->len, ref->freq);
-  ref->found_chars = (char*) malloc(ref->len * sizeof(ref->found_chars[0]));
-  memset(ref->found_chars, 0, ref->len * sizeof(ref->found_chars[0]));
-
-  ref->found_not_chars = (char**) malloc(ref->len * sizeof(ref->found_not_chars[0]));
-  for(int i = 0; i < ref->len; i++)
-  {
-    ref->found_not_chars[i] = (char*) malloc((ALPHABETH_SIZE + 1) * sizeof(ref->found_not_chars[0][0]));
-    ref->found_not_chars[i][0] = '\0';
-  }
-
+  ref->found_chars = calloc(ref->len, sizeof(ref->found_chars[0])); 
+  ref->found_not_chars = calloc(ref->len, sizeof(*ref->found_not_chars));
   ref->found_freq_min.size = 0;
   memset(ref->found_freq_max, -1, sizeof(ref->found_freq_max));
 }
@@ -900,8 +910,6 @@ void init_ref(reference_t *const ref, const char *const word, const size_t len)
 static inline void ref_dispose(reference_t *ref)
 {
   free(ref->found_chars);
-  for(int i = 0; i < ref->len; ++i)
-    free(ref->found_not_chars[i]);
   free(ref->found_not_chars);
 }
 
@@ -914,8 +922,22 @@ void print_found_ref(const reference_t *const ref)
 
   printf("not: {");
   for(int i = 0; i < ref->len; ++i)
-    if(ref->found_not_chars[i] != NULL)
-      printf("%d: \"%s\", ", i, ref->found_not_chars[i]);
+  {
+    bool first = true;
+    for(int j = 0; j < ALPHABETH_SIZE; ++j)
+    {
+      if(bitset_test(ref->found_not_chars[i], j))
+      {
+        if(first)
+          printf("%d: \"", i);
+        first = false;
+        printf("%c", pos_to_char(j));
+      }
+    }
+
+    if(!first)
+      printf("\", ");
+  }
   printf("}\n");
 
   printf("min freq: {");
@@ -1007,26 +1029,9 @@ static bool compare_words(reference_t *const ref,
 
     if(found_not_char)
     {
-      char *str = ref->found_not_chars[i];
-      char to_append = new[i];
-
-      size_t len;
-      bool append = true;
-      for(len = 0; str[len]; ++len)
-      {
-        if(str[len] == to_append)
-        {
-          append = false;
-          break;
-        }
-      }
-      
-      if(append)
-      {
-        str[len] = to_append;
-        str[len + 1] = '\0';
+      if(!bitset_test(ref->found_not_chars[i], pos))
         anything_changed = true;
-      }
+      bitset_set(ref->found_not_chars[i], pos, 1);
     }
   }
 
@@ -1041,16 +1046,8 @@ static iter_res_t known_chars_filter(const reference_t *const ref,
 {
   if(ref->found_freq_max[alphabeth_pos] >= 0 && char_freq > ref->found_freq_max[alphabeth_pos])
     return MARK_DELETED;
-
-  if(ref->found_not_chars[pos])
-  {
-    char *found_not_chars = ref->found_not_chars[pos];
-    // Max ALPHABETH_SIZE, so should be fairly small
-    for(int k = 0; found_not_chars[k]; ++k)
-      if(c == found_not_chars[k])
-        return MARK_DELETED;
-  }
-
+  if(bitset_test(ref->found_not_chars[pos], alphabeth_pos))
+    return MARK_DELETED;
   return VISIT_SUBTREE;
 }
 
