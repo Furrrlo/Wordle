@@ -9,7 +9,7 @@ Uses gcc specific extensions and bad code in general.
 ## Grading
 
 UpTo18 test uses between 163.840 and 204.800 test strings of 5 characters each, for 15 games 
-(found by tinkering with the array_list size).
+(found by tinkering with the array_list size) with 20 re-insertions (+inserisci_inizio).
 
 In some tests, input is messed up and doesn't respect what's indicated in the requisites, i.e. 
 characters out of the given alphabeth, or instruction given at the wrong time (in particular, I think it's in the UpTo30).
