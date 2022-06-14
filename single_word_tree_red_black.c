@@ -697,20 +697,18 @@ bool word_tree_for_each_ordered_visitor(const alphabeth_size_t alphabeth_pos,
   }
 
   params->curr_str[pos] = c;
+  params->curr_freq[alphabeth_pos]++;
   if(pos + 1 < params->len)
   {
-    params->curr_freq[alphabeth_pos]++;
     word_tree_for_each_ordered_helper(child, params, pos + 1);
-    params->curr_freq[alphabeth_pos]--;
   }
   else
   {
-    params->curr_freq[alphabeth_pos]++;
     if(params->word_func(params->curr_str, params->curr_freq) == MARK_DELETED)
       child->deletion_level = params->deletion_level;
-    params->curr_freq[alphabeth_pos]--;
   }
-
+  params->curr_freq[alphabeth_pos]--;
+  
   if(child->deletion_level < params->deletion_level)
   {
     if(expanded)
@@ -727,6 +725,13 @@ void word_tree_for_each_ordered_helper(word_tree_t *const tree,
                                        const size_t pos)
 {
   struct expanded_word_tree_node *expanded = word_tree_get_expanded(tree);
+  bool is_expanded_valid = expanded != NULL && !word_tree_expanded_is_invalidated(expanded, params->deletion_level);
+  size_t expanded_non_deleted_size;
+  if(expanded)
+  {
+    expanded_non_deleted_size = expanded->non_deleted_size;
+    expanded->non_deleted_size = 0;
+  }
 
   bool any_not_deleted = false;
   void (*visit_func)(alphabeth_size_t, word_tree_t*) = LAMBDA(void, (alphabeth_size_t i, word_tree_t *child) {
@@ -737,16 +742,15 @@ void word_tree_for_each_ordered_helper(word_tree_t *const tree,
   if(params->hint != NULL && params->hint[pos] != 0)
   {
     alphabeth_size_t hint_pos = char_to_pos(params->hint[pos]);
-    word_tree_t *child;
     
-    bool is_expanded = expanded != NULL && !word_tree_expanded_is_invalidated(expanded, params->deletion_level);
-    if(is_expanded && expanded->non_deleted_size <= 1)
+    word_tree_t *child;  
+    if(is_expanded_valid && expanded->non_deleted_size <= 1)
     {
       child = expanded->non_deleted_size == 0 ? NULL :
         expanded->non_deleted_children[0]->alphabeth_pos != hint_pos ? NULL :
           expanded->non_deleted_children[0]; 
     }
-    else if(is_expanded)
+    else if(is_expanded_valid)
     {
       word_tree_t lookup = { .alphabeth_pos = hint_pos };
       word_tree_t *lookup_ptr = &lookup;
@@ -765,20 +769,11 @@ void word_tree_for_each_ordered_helper(word_tree_t *const tree,
     }
 
     if(child != NULL)
-    {
-      if(expanded)
-        expanded->non_deleted_size = 0;
       visit_func(hint_pos, child);
-    }
-    
-    word_tree_set_deletion_level_if_expanded(tree, params->deletion_level);
   }
-  else if(expanded != NULL && !word_tree_expanded_is_invalidated(expanded, params->deletion_level))
+  else if(is_expanded_valid)
   {
-    size_t len = expanded->non_deleted_size;
-    expanded->non_deleted_size = 0;
-
-    for(size_t i = 0; i < len; ++i)
+    for(size_t i = 0; i < expanded_non_deleted_size; ++i)
     {
       word_tree_t *child = expanded->non_deleted_children[i];
       visit_func(child->alphabeth_pos, child);
@@ -786,8 +781,6 @@ void word_tree_for_each_ordered_helper(word_tree_t *const tree,
   }
   else
   {
-    if(expanded)
-      expanded->non_deleted_size = 0;
     // rb_tree_for_each_ordered(word_tree_children(tree), params->deletion_level, visit_func);
     for(rb_tree_t *curr = rb_tree_first(word_tree_children(tree));
         curr != NULL;
@@ -798,11 +791,10 @@ void word_tree_for_each_ordered_helper(word_tree_t *const tree,
 
       visit_func(curr->value.alphabeth_pos, &curr->value); 
     } 
-    word_tree_set_deletion_level_if_expanded(tree, params->deletion_level);
   }
 
-  if(!any_not_deleted)
-    tree->deletion_level = params->deletion_level;
+  tree->deletion_level = any_not_deleted ? tree->deletion_level : params->deletion_level;
+  word_tree_set_deletion_level_if_expanded(tree, params->deletion_level);
 }
 
 static inline
