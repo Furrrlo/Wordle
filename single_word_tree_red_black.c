@@ -170,7 +170,7 @@ static inline void rb_tree_set_color(struct rb_tree *const node, const rb_color_
 {
   node->_parent_color = (node->_parent_color & ~3) | (color & 3);
 }
-
+/*
 static void rb_tree_for_each_ordered(rb_tree_t *const tree, 
                                      const deletion_level_t deletion_level,
                                      void (*func)(alphabeth_size_t, word_tree_t *))
@@ -181,11 +181,42 @@ static void rb_tree_for_each_ordered(rb_tree_t *const tree,
   if(!rb_tree_is_empty(tree))
     rb_tree_for_each_ordered(tree->left, deletion_level, func);
   
-  if(tree->value.deletion_level < deletion_level)
+  bool is_deleted = tree->value.deletion_level >= deletion_level;
+  if(!is_deleted)
     func(tree->value.alphabeth_pos, &tree->value);
   
   if(!rb_tree_is_empty(tree))
     rb_tree_for_each_ordered(tree->right, deletion_level, func);
+}
+*/
+static rb_tree_t *rb_tree_first(const rb_tree_t *const tree)
+{
+	if(rb_tree_is_empty(tree))
+		return NULL;
+
+  rb_tree_t *node = (rb_tree_t*) tree;
+	while(node->left != NULL)
+    node = node->left;
+	return node;
+}
+
+static rb_tree_t *rb_tree_next(const rb_tree_t *const node)
+{
+	if(rb_tree_is_empty(node))
+		return NULL;
+
+	if(node->right) {
+		rb_tree_t *next = node->right;
+    while(next->left != NULL)
+			next = next->left;
+		return next;
+	}
+
+  rb_tree_t *next = (rb_tree_t*) node;
+	rb_tree_t *parent;
+	while ((parent = rb_tree_parent(next)) != NULL && next == parent->right)
+		next = parent;
+	return parent;
 }
 
 static struct word_tree_node *rb_tree_get(const rb_tree_t *const tree, 
@@ -757,7 +788,16 @@ void word_tree_for_each_ordered_helper(word_tree_t *const tree,
   {
     if(expanded)
       expanded->non_deleted_size = 0;
-    rb_tree_for_each_ordered(word_tree_children(tree), params->deletion_level, visit_func);
+    // rb_tree_for_each_ordered(word_tree_children(tree), params->deletion_level, visit_func);
+    for(rb_tree_t *curr = rb_tree_first(word_tree_children(tree));
+        curr != NULL;
+        curr = rb_tree_next(curr))
+    {
+      if(curr->value.deletion_level >= params->deletion_level)
+        continue;
+
+      visit_func(curr->value.alphabeth_pos, &curr->value); 
+    } 
     word_tree_set_deletion_level_if_expanded(tree, params->deletion_level);
   }
 
