@@ -483,16 +483,18 @@ typedef unsigned long bitset_t; // 64 bits, exactly the alphabeth size
 static inline
 void bitset_set(bitset_t bitset[], size_t pos, bool val)
 {
+  bitset_t mask = (bitset_t) 1 << (pos % BITSET_BITS);
   if(val)
-    bitset[pos / BITSET_BITS] |= (1 << (pos % BITSET_BITS));
+    bitset[pos / BITSET_BITS] |= mask;
   else
-    bitset[pos / BITSET_BITS] &= ~(1 << (pos % BITSET_BITS));
+    bitset[pos / BITSET_BITS] &= ~mask;
 }
 
 static inline
 bool bitset_test(bitset_t bitset[], size_t pos)
 {
-  return (bitset[pos / BITSET_BITS] & (1 << (pos % BITSET_BITS)));
+  bitset_t mask = (bitset_t) 1 << (pos % BITSET_BITS);
+  return (bitset[pos / BITSET_BITS] & mask);
 }
 
 typedef struct
