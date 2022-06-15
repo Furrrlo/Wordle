@@ -1,10 +1,15 @@
 Uses gcc specific extensions and bad code in general.
 
-- array_list.c uses a big-ass list and normally filters it, but it exceeeds in time complexity.
-- word_tree.c stores each character of the given alphabeth as a tree node and filters by first copying to a 
-  second tree. Exceeds in space complecity.
-- single_word_tree.c is the same as the above, but keeps 1 single tree and filters it each time it has to
+- [ArrayList](../c267ccf06c604bd54f5e1df870a4347ee2184fc9/array_list.c): uses a big-ass list and normally filters it, but it exceeeds in time complexity.
+- [Two naive tries](../c267ccf06c604bd54f5e1df870a4347ee2184fc9/word_tree.c) stores each character of the given alphabeth as a tree node and filters by first copying to a 
+  second tree. Exceeds in space complexity. It's literally massive and wastes ton of space.
+- [Naive trie](../c267ccf06c604bd54f5e1df870a4347ee2184fc9/single_word_tree.c) is the same as the above, but keeps 1 single tree and filters it each time it has to
   print or calculate its size. Still exceeds in space complexity. 
+- [Red-black trie](../78ad7d16bb684987ad5a8907cd8a8fb2cee8eb5a/single_word_tree_red_black.c) trie implementation where each node keeps children in a red-black tree. Still 
+  exceeds in space complexity.
+- [Overengineered red-black trie](../cea2dc8d8729fe807d3a8496d40e8a4990ae5d10/single_word_tree_red_black.c) same as above, but optionally expands nodes to keep track of 
+  undeleted nodes in order to iterate less. Gets killed by bad cache locality and branch missprediction.
+- [ArrayList trie]() current one, hopefully goes well :I
 
 ## Grading
 
