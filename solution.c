@@ -393,6 +393,7 @@ void wtree_for_each_ordered(wtree_t *const tree,
     __wtree_for_each_ordered_helper(tree->root, &params, 0);
   else
     __wtree_for_each_ordered_helper_invalidated(tree->root, &params, 0);
+  tree->invalidated = false;
 }
 
 
