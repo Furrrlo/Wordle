@@ -476,22 +476,23 @@ unsigned short *__freq_to_update_for_pos(char_freqs_t *const freq,
   return &new->n;
 }
 
-#define BITSET_SIZE(size) (((size) + 7) / 8)
-typedef unsigned char bitset_t;
+typedef unsigned long bitset_t; // 64 bits, exactly the alphabeth size
+#define BITSET_BITS (8 * sizeof(bitset_t))
+#define BITSET_ARRAY_SIZE(size) (((size) + BITSET_BITS - 1) / BITSET_BITS)
 
 static inline
 void bitset_set(bitset_t bitset[], size_t pos, bool val)
 {
   if(val)
-    bitset[pos / 8] |= (1 << (pos % 8));
+    bitset[pos / BITSET_BITS] |= (1 << (pos % BITSET_BITS));
   else
-    bitset[pos / 8] &= ~(1 << (pos % 8));
+    bitset[pos / BITSET_BITS] &= ~(1 << (pos % BITSET_BITS));
 }
 
 static inline
 bool bitset_test(bitset_t bitset[], size_t pos)
 {
-  return (bitset[pos / 8] & (1 << (pos % 8)));
+  return (bitset[pos / BITSET_BITS] & (1 << (pos % BITSET_BITS)));
 }
 
 typedef struct
@@ -500,7 +501,7 @@ typedef struct
   size_t len;
   int freq[ALPHABETH_SIZE];
   char *found_chars;
-  bitset_t (*found_not_chars)[BITSET_SIZE(ALPHABETH_SIZE)];
+  bitset_t (*found_not_chars)[BITSET_ARRAY_SIZE(ALPHABETH_SIZE)];
   char_freqs_t found_freq_min;
   int found_freq_max[ALPHABETH_SIZE];
 } reference_t;
