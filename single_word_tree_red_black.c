@@ -12,7 +12,6 @@
 // ASCII ordered
 char ALPHABETH[] = "-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
 typedef unsigned char alphabeth_size_t; // 60 < 255, should be enough
-typedef unsigned short deletion_level_t; 
 
 static inline char pos_to_char(const alphabeth_size_t pos)
 {
@@ -100,728 +99,306 @@ static alphabeth_size_t char_to_pos(const char c)
   return -1;
 }
 
-struct rb_tree;
-typedef struct word_tree_node 
+// Important: struct size should be able to fit into a cache line
+// Max children array size is 65, so it's 3 + 65 * 2 * (1 + 8) = 1173 bytes 
+struct wtree_node 
 {
-  unsigned long _children_or_expanded;
-  alphabeth_size_t alphabeth_pos;
-  deletion_level_t deletion_level;
-} word_tree_t;
-
-struct expanded_word_tree_node
-{
-  struct rb_tree *children;
+  alphabeth_size_t children_max_size;
   alphabeth_size_t non_deleted_size;
-  deletion_level_t non_deleted_deletion_level;
-  word_tree_t *non_deleted_children[ALPHABETH_SIZE];
+  alphabeth_size_t deleted_size;
+  struct wtree_edge *children;
 };
 
-typedef enum { BLACK, RED } __attribute__ ((__packed__)) rb_color_t;
-
-typedef struct rb_tree
+struct wtree_edge
 {
-  struct word_tree_node value;
+  alphabeth_size_t alphabeth_pos;
+  struct wtree_node *node;
+};
 
-  unsigned long _parent_color; 
-  struct rb_tree *right;
-  struct rb_tree *left;
-} rb_tree_t;
+typedef struct {
+  struct wtree_node *root;
+  bool invalidated;
+} wtree_t;
 
-struct rb_tree global_rb_tree_nodes[8192 * 250];
-int global_rb_tree_nodes_cursor = 0;
-
-static inline rb_tree_t *new_rb_tree()
+static inline struct wtree_node *new_wtree_node(alphabeth_size_t children_size)
 {
+  struct wtree_node *node = malloc(sizeof(*node) + children_size * 2 * sizeof(node->children[0]));
+  if(node == NULL)
+    return NULL;
+
+  node->children_max_size = children_size;
+  node->non_deleted_size = 0;
+  node->deleted_size = 0;
+  node->children = (void*) (&node->children + 1);
+  return node;
+}
+
+static inline wtree_t *new_word_tree()
+{
+  wtree_t *tree = malloc(sizeof(*tree));
+  if(tree == NULL)
+    return NULL;
+
+  tree->root = new_wtree_node(1);
+  if(tree->root == NULL)
+  {
+    free(tree);
+    return NULL;
+  }
+  
+  tree->invalidated = false;
+  return tree;
+}
+
+static inline void wtree_free(wtree_t *tree)
+{
+  if(tree == NULL)
+    return;
+  // TODO:
+}
+
+static inline int wtree_edge_cmp(const void *o1, const void *o2)
+{
+  return ((struct wtree_edge*) o1)->alphabeth_pos - ((struct wtree_edge*) o2)->alphabeth_pos;
+}
+
+static struct wtree_edge *wtree_node_get_child(const struct wtree_node *const node, 
+                                               const alphabeth_size_t alphabeth_pos)
+{
+  struct wtree_edge lookup = { .alphabeth_pos = alphabeth_pos };
+  struct wtree_edge *child = bsearch(
+      &lookup,
+      node->children,
+      node->non_deleted_size,
+      sizeof(node->children[0]),
+      wtree_edge_cmp);
+  if(child != NULL)
+    return child;
+
+  // TODO: optimize?
+  for(int i = 0; i < node->deleted_size; ++i)
+  {
+    child = &node->children[node->children_max_size + i];
+    if(child->alphabeth_pos == alphabeth_pos)
+      return child;
+  }
+
   return NULL;
 }
 
-static inline void rb_tree_free(rb_tree_t *tree)
+static bool wtree_contains(const wtree_t *const tree, const char *const str)
 {
-  if(tree == NULL)
-    return;
-
-  // rb_tree_free(tree->value.children);
-  // rb_tree_free(tree->right);
-  // rb_tree_free(tree->left);
-  // free(tree);
-}
-
-static inline bool rb_tree_is_empty(const rb_tree_t *const tree)
-{
-  return tree == NULL;
-}
-
-static inline struct rb_tree *rb_tree_parent(const struct rb_tree *node)
-{
-  return (struct rb_tree*) (node->_parent_color & ~3); 
-}
-
-static inline rb_color_t rb_tree_color(const struct rb_tree *const node)
-{
-  return node->_parent_color & 3; 
-}
-
-static inline void rb_tree_set_parent(struct rb_tree *const node, const struct rb_tree *const parent)
-{
-  node->_parent_color = (unsigned long) parent | rb_tree_color(node);
-}
-
-static inline void rb_tree_set_color(struct rb_tree *const node, const rb_color_t color)
-{
-  node->_parent_color = (node->_parent_color & ~3) | (color & 3);
-}
-/*
-static void rb_tree_for_each_ordered(rb_tree_t *const tree, 
-                                     const deletion_level_t deletion_level,
-                                     void (*func)(alphabeth_size_t, word_tree_t *))
-{
-  if(rb_tree_is_empty(tree))
-      return;
-
-  if(!rb_tree_is_empty(tree))
-    rb_tree_for_each_ordered(tree->left, deletion_level, func);
-  
-  bool is_deleted = tree->value.deletion_level >= deletion_level;
-  if(!is_deleted)
-    func(tree->value.alphabeth_pos, &tree->value);
-  
-  if(!rb_tree_is_empty(tree))
-    rb_tree_for_each_ordered(tree->right, deletion_level, func);
-}
-*/
-static rb_tree_t *rb_tree_first(const rb_tree_t *const tree)
-{
-	if(rb_tree_is_empty(tree))
-		return NULL;
-
-  rb_tree_t *node = (rb_tree_t*) tree;
-	while(node->left != NULL)
-    node = node->left;
-	return node;
-}
-
-static rb_tree_t *rb_tree_next(const rb_tree_t *const node)
-{
-	if(rb_tree_is_empty(node))
-		return NULL;
-
-	if(node->right) {
-		rb_tree_t *next = node->right;
-    while(next->left != NULL)
-			next = next->left;
-		return next;
-	}
-
-  rb_tree_t *next = (rb_tree_t*) node;
-	rb_tree_t *parent;
-	while ((parent = rb_tree_parent(next)) != NULL && next == parent->right)
-		next = parent;
-	return parent;
-}
-
-static struct word_tree_node *rb_tree_get(const rb_tree_t *const tree, 
-                                          const alphabeth_size_t key)
-{
-  if(rb_tree_is_empty(tree))
-    return NULL;
-
-  if(tree->value.alphabeth_pos == key)
-    return (struct word_tree_node*) &tree->value;
-
-  if(key < tree->value.alphabeth_pos)
-    return rb_tree_get(tree->left, key);
-  return rb_tree_get(tree->right, key);
-}
-
-static struct rb_tree *rb_tree_bst(rb_tree_t **const tree, struct rb_tree *const node, const bool allow_duplicates)
-{
-  if(rb_tree_is_empty(*tree))
-  {
-    *tree = node;
-    return NULL;
-  }
-
-  alphabeth_size_t node_key = node->value.alphabeth_pos;
-  alphabeth_size_t tree_key = (*tree)->value.alphabeth_pos;
-  if(!allow_duplicates && node_key == tree_key)
-    return *tree;
-
-  if(node_key < tree_key)
-  {
-    struct rb_tree *res = rb_tree_bst(&(*tree)->left, node, allow_duplicates);
-    if(res == NULL)
-      rb_tree_set_parent((*tree)->left, *tree);
-    return res;
-  }
-  
-  struct rb_tree *res = rb_tree_bst(&(*tree)->right, node, allow_duplicates);
-  if(res == NULL)
-    rb_tree_set_parent((*tree)->right, *tree);
-  return res;
-}
-
-#ifdef DEBUG
-static bool rb_tree_is_balanced_helper(const rb_tree_t *const tree, 
-                                       int *const maxh, 
-                                       int *const minh)
-{
-    if(tree == NULL)
-    {
-        *maxh = *minh = 0;
-        return true;
-    }
- 
-    int lmxh, lmnh;
-    if(!rb_tree_is_balanced_helper(tree->left, &lmxh, &lmnh))
-        return false;
-    int rmxh, rmnh;
-    if(!rb_tree_is_balanced_helper(tree->right, &rmxh, &rmnh))
-        return false;
- 
-    *maxh = MAX(lmxh, rmxh) + 1;
-    *minh = MIN(lmnh, rmnh) + 1; 
-    return *maxh <= 2 * *minh;
-}
-
-static inline bool rb_tree_is_balanced(const rb_tree_t *const tree)
-{
-  int maxh, minh;
-  return rb_tree_is_balanced_helper(tree, &maxh, &minh);
-}
-#endif
-
-static void rb_tree_rrotate(rb_tree_t **const tree, struct rb_tree *const node)
-{
-    struct rb_tree *left = node->left;
-    node->left = left->right;
-    if(node->left)
-      rb_tree_set_parent(node->left, node);
-    rb_tree_set_parent(left, rb_tree_parent(node));
-    if (!rb_tree_parent(node))
-      *tree = left;
-    else if (node == rb_tree_parent(node)->left)
-      rb_tree_parent(node)->left = left;
-    else
-      rb_tree_parent(node)->right = left;
-    left->right = node;
-    rb_tree_set_parent(node, left);
-}
-
-static void rb_tree_lrotate(rb_tree_t **const tree, struct rb_tree *const node)
-{
-    struct rb_tree *right = node->right;
-    node->right = right->left;
-    if(node->right)
-      rb_tree_set_parent(node->right, node);
-    rb_tree_set_parent(right, rb_tree_parent(node));
-    if(!rb_tree_parent(node))
-      *tree = right;
-    else if (node == rb_tree_parent(node)->left)
-      rb_tree_parent(node)->left = right;
-    else
-      rb_tree_parent(node)->right = right;
-    right->left = node;
-    rb_tree_set_parent(node, right);
-}
-
-static void rb_tree_fixup(rb_tree_t **const tree, struct rb_tree *node)
-{
-  struct rb_tree *parent = NULL;
-  struct rb_tree *grand_parent = NULL;
-
-  while(node != *tree && rb_tree_color(node) != BLACK && rb_tree_color(rb_tree_parent(node)) == RED)
-  {
-    parent = rb_tree_parent(node);
-    grand_parent = rb_tree_parent(parent);
-
-    if(parent == grand_parent->left)
-    {
-      struct rb_tree *uncle = grand_parent->right;
-
-      if(uncle != NULL && rb_tree_color(uncle) == RED)
-      {
-        rb_tree_set_color(grand_parent, RED);
-        rb_tree_set_color(parent, BLACK);
-        rb_tree_set_color(uncle, BLACK);
-        node = grand_parent;
-        continue;
-      }
-
-      // uncle == NULL || rb_tree_color(uncle) == BLACK
-      if(node == parent->right)
-      {
-        rb_tree_lrotate(tree, parent);
-        node = parent;
-        parent = rb_tree_parent(node);
-      }
-
-      rb_tree_rrotate(tree, grand_parent);
-      rb_color_t tmp = rb_tree_color(parent);
-      rb_tree_set_color(parent, rb_tree_color(grand_parent));
-      rb_tree_set_color(grand_parent, tmp);
-      node = parent;
-      continue;
-    }
-
-    // parent == grand_parent->right
-    struct rb_tree *uncle = grand_parent->left;
-
-    if(uncle != NULL && rb_tree_color(uncle) == RED)
-    {
-      rb_tree_set_color(grand_parent, RED);
-      rb_tree_set_color(parent, BLACK);
-      rb_tree_set_color(uncle, BLACK);
-      node = grand_parent;
-      continue;
-    }
-     
-    // uncle == NULL || rb_tree_color(uncle) == BLACK 
-    if(node == parent->left)
-    {
-      rb_tree_rrotate(tree, parent);
-      node = parent;
-      parent = rb_tree_parent(node);
-    }
-
-    rb_tree_lrotate(tree, grand_parent);
-    rb_color_t tmp = rb_tree_color(parent);
-    rb_tree_set_color(parent, rb_tree_color(grand_parent));
-    rb_tree_set_color(grand_parent, tmp);
-    node = parent;
-  }
-
-  rb_tree_set_color(*tree, BLACK);
-#ifdef DEBUG
-  if(!rb_tree_is_balanced(*tree))
-  {
-    printf("Tree is not balanced\n");
-    exit(-104);
-  }
-#endif
-}
-
-static struct word_tree_node *rb_tree_do_put(rb_tree_t **const tree, 
-                                             const alphabeth_size_t key, 
-                                             const bool allow_duplicates)
-{
-  // struct rb_tree *new_node = malloc(sizeof(*new_node));
-  if(global_rb_tree_nodes_cursor >= sizeof(global_rb_tree_nodes) / sizeof(struct rb_tree))
-  {
-    printf("No more rb_tree nodes\n");
-    exit(-20);
-    return NULL;
-  }
-  
-  struct rb_tree *new_node = &global_rb_tree_nodes[global_rb_tree_nodes_cursor++];
-#ifdef DEBUG
-  if(new_node == NULL)
-  {
-    printf("Failed to allocate rb_tree\n");
-    exit(-40);
-    return NULL;
-  }
-#endif
-  
-  new_node->value.alphabeth_pos = key;
-  new_node->value._children_or_expanded = (unsigned long) new_rb_tree();
-  new_node->value.deletion_level = 0;
-  rb_tree_set_color(new_node, RED);
-  new_node->right = NULL;
-  new_node->left = NULL;
-  rb_tree_set_parent(new_node, NULL);
-
-  struct rb_tree *already_present = rb_tree_bst(tree, new_node, allow_duplicates);
-  if(already_present != NULL)
-  {
-    // rb_tree_free(new_node);
-    global_rb_tree_nodes_cursor--;
-    return &already_present->value;
-  }
-
-  rb_tree_fixup(tree, new_node);
-  return &new_node->value;
-}
-
-static inline struct word_tree_node *rb_tree_put(rb_tree_t **const tree, const alphabeth_size_t key)
-{
-  return rb_tree_do_put(tree, key, true);
-}
-
-static inline struct word_tree_node *rb_tree_put_if_absent(rb_tree_t **const tree, const alphabeth_size_t key)
-{
-  return rb_tree_do_put(tree, key, false);
-}
-
-static inline word_tree_t *new_word_tree()
-{
-  word_tree_t *ref = malloc(sizeof(*ref));
-#ifdef DEBUG
-  if(ref == NULL)
-  {
-    printf("Couldn't allocate word_tree_t\n");
-    exit(-3);
-    return NULL;
-  }
-#endif
-
-  ref->_children_or_expanded = (unsigned long) new_rb_tree();
-  ref->deletion_level = 1;
-  return ref;
-}
-
-static inline bool word_tree_is_expanded(const word_tree_t *const node)
-{
-  return node->_children_or_expanded & 3;
-}
-
-static inline 
-struct expanded_word_tree_node *word_tree_get_expanded(const word_tree_t *const node)
-{
-  if(!word_tree_is_expanded(node))
-    return NULL;
-
-  return (struct expanded_word_tree_node*) (node->_children_or_expanded & ~3);
-}
-
-static inline 
-bool word_tree_expanded_is_invalidated(const struct expanded_word_tree_node *const expanded,
-                                       const deletion_level_t deletion_level)
-{
-  return expanded->non_deleted_deletion_level < deletion_level;
-}
-
-static inline 
-void word_tree_set_deletion_level_if_expanded(word_tree_t *const node, 
-                                              const deletion_level_t deletion_level)
-{
-  struct expanded_word_tree_node *expanded = word_tree_get_expanded(node);
-  if(expanded == NULL)
-    return;
-  
-  expanded->non_deleted_deletion_level = deletion_level;
-}
-
-static inline
-void word_tree_undelete_child_if_expanded(word_tree_t *const node,
-                                          const word_tree_t *const child,
-                                          const deletion_level_t deletion_level)
-{
-  struct expanded_word_tree_node *expanded = word_tree_get_expanded(node);
-  if(expanded == NULL || word_tree_expanded_is_invalidated(expanded, deletion_level))
-    return;
-
-  size_t arr_max_len = sizeof(expanded->non_deleted_children) / sizeof(expanded->non_deleted_children[0]);
-  if(expanded->non_deleted_size >= arr_max_len)
-    return;
-
-  int (*node_pointer_cmp)(const void*, const void*) = LAMBDA(int, (const void *o1, const void *o2) {
-    return (*((word_tree_t**) o1))->alphabeth_pos - (*((word_tree_t**) o2))->alphabeth_pos;
-  });
-
-  word_tree_t *found = bsearch(
-      &child,
-      expanded->non_deleted_children,
-      expanded->non_deleted_size,
-      sizeof(expanded->non_deleted_children[0]),
-      node_pointer_cmp);
-  if(found != NULL)
-    return;
-
-  expanded->non_deleted_children[expanded->non_deleted_size++] = (word_tree_t*) child;
-  qsort(
-      expanded->non_deleted_children,
-      expanded->non_deleted_size,
-      sizeof(expanded->non_deleted_children[0]),
-      node_pointer_cmp);
-}
-
-static inline rb_tree_t *word_tree_children(const word_tree_t *const node)
-{
-  struct expanded_word_tree_node *expanded = word_tree_get_expanded(node); 
-  if(expanded == NULL)
-    return (rb_tree_t*) (node->_children_or_expanded & ~3); 
-  return expanded->children;
-}
-
-static inline void word_tree_put_children(word_tree_t *const node,
-                                          const rb_tree_t *children)
-{
-  struct expanded_word_tree_node *expanded = word_tree_get_expanded(node);
-  if(expanded == NULL)
-  {
-    node->_children_or_expanded = (unsigned long) children;
-    return;
-  }
-
-  expanded->children = (rb_tree_t*) children;
-}
-
-static inline void word_tree_expand(word_tree_t *const node)
-{
-  if(word_tree_is_expanded(node))
-    return;
-
-  struct expanded_word_tree_node *expanded = malloc(sizeof(*expanded));
-  expanded->children = (rb_tree_t*) node->_children_or_expanded;
-  expanded->non_deleted_size = 0;
-  expanded->non_deleted_deletion_level = 0;
-  node->_children_or_expanded = ((unsigned long) expanded) | 1;
-}
-
-static inline void word_tree_expanded_free(word_tree_t *tree,
-                                           struct expanded_word_tree_node *expanded)
-{
-  if(expanded == NULL)
-    return;
-
-  rb_tree_free(word_tree_children(tree));
-  free(expanded);
-}
-
-static inline void word_tree_free(word_tree_t *tree)
-{
-  if(tree == NULL)
-    return;
-
-  if(word_tree_is_expanded(tree))
-    word_tree_expanded_free(tree, word_tree_get_expanded(tree));
-  else
-    rb_tree_free(word_tree_children(tree));
-  free(tree);
-}
-
-/* O(len) */
-static bool word_tree_contains(const word_tree_t *const tree, const char *const str)
-{
-  const word_tree_t *subtree = tree;
+  const struct wtree_node *subtree = tree->root;
   for(size_t i = 0; str[i]; ++i)
   {
-    const word_tree_t *child = rb_tree_get(
-        word_tree_children(subtree), char_to_pos(str[i]));
-    if(child == NULL)
+    struct wtree_edge *edge = wtree_node_get_child(subtree, char_to_pos(str[i]));
+    if(edge == NULL)
       return false;
-
-    subtree = child;
+    subtree = edge->node;
   }
 
   return true;
 }
 
-static bool word_tree_push_helper(word_tree_t *const tree, 
-                                  const char *const str, 
-                                  const deletion_level_t deletion_level,
-                                  const size_t i)
+static bool wtree_push_helper(struct wtree_node **const subtree_ptr, 
+                              const char *const str, 
+                              const size_t i)
 {
   if(!str[i])
     // Undeletion shouldn't matter if it's already present, 
     // words can't be duped (I think)
     return true; 
 
-  alphabeth_size_t pos = char_to_pos(str[i]);
-  if(pos == -1)
+  alphabeth_size_t alphabeth_pos = char_to_pos(str[i]);
+  if(alphabeth_pos == -1)
     return false;
 
-  rb_tree_t *children = word_tree_children(tree);
-  word_tree_t *child = rb_tree_put_if_absent(&children, pos);
-  word_tree_put_children(tree, children);
+  struct wtree_node* subtree = *subtree_ptr;
+  struct wtree_edge *child = wtree_node_get_child(subtree, alphabeth_pos);
+  if(child != NULL)
+    return wtree_push_helper(&child->node, str, i + 1);
 
-  // Should still be O(logn), accurate enough
-  int height_hint = 0;
-  for(rb_tree_t *curr = children; curr; curr = curr->left)
-    height_hint++;
-
-  int size_hint = 1 << height_hint; // pow(2, height_hint)
-  if(size_hint >= ALPHABETH_SIZE / 2)
-    word_tree_expand(tree);
-
-  bool res = word_tree_push_helper(child, str, deletion_level, i + 1);
-  if(res)
+  struct wtree_node *new_child_node = new_wtree_node(1);
+  if(new_child_node == NULL)
+    return false;
+  
+  alphabeth_size_t curr_size = subtree->non_deleted_size + subtree->deleted_size;
+  if(curr_size >= subtree->children_max_size)
   {
-    tree->deletion_level = 0;
-    word_tree_undelete_child_if_expanded(tree, child, deletion_level);
+    struct wtree_node *old = subtree;
+    *subtree_ptr = (subtree = new_wtree_node(old->children_max_size * 2));
+    subtree->non_deleted_size = old->non_deleted_size;
+    subtree->deleted_size = old->deleted_size;
+    memcpy(subtree->children, old->children, old->non_deleted_size * sizeof(subtree->children[0]));
+    memcpy(
+        &subtree->children[subtree->children_max_size], 
+        &old->children[old->children_max_size], 
+        old->deleted_size * sizeof(subtree->children[0]));
+    free(old);
   }
+
+  child = &subtree->children[subtree->non_deleted_size++];
+  child->alphabeth_pos = alphabeth_pos;
+  child->node = new_child_node;
+  bool res = wtree_push_helper(&child->node, str, i + 1);
+  qsort(
+      subtree->children, 
+      subtree->non_deleted_size,
+      sizeof(subtree->children[0]),
+      wtree_edge_cmp);
   return res;
 }
 
-static inline bool word_tree_push(word_tree_t *const tree, const char *const str)
+static inline bool wtree_push(wtree_t *const tree, const char *const str)
 {
-  deletion_level_t root_deletion_level = tree->deletion_level;
-  bool res = word_tree_push_helper(tree, str, root_deletion_level, 0);
-  // Make sure it's not reset to 0
-  tree->deletion_level = root_deletion_level;
-  return res;
+  return wtree_push_helper(&tree->root, str, 0);
 }
 
 typedef enum {
   VISIT_SUBTREE = 1,
-  SKIP_SUBTREE = 2,
   MARK_KEPT = 3,
   MARK_DELETED = 4,
 } __attribute__ ((__packed__)) iter_res_t;
 
-struct word_tree_for_each_params 
+struct wtree_for_each_params 
 {
   size_t len; 
-  deletion_level_t deletion_level; 
-  const char *hint;
   
   char *curr_str; 
   int curr_freq[ALPHABETH_SIZE];
 
-  iter_res_t (*filter)(size_t, char, alphabeth_size_t, int);
-  iter_res_t (*word_func)(char*, int*);
+  iter_res_t (*char_filter)(size_t, char, alphabeth_size_t, int, void*);
+  iter_res_t (*word_filter)(const char*, const int*, void*);
+  void (*word_func)(const char*, void*);
+  void *args;
 };
 
-static 
-void word_tree_for_each_ordered_helper(word_tree_t *const, 
-                                       struct word_tree_for_each_params *const, 
-                                       const size_t pos);
-
-static
-bool word_tree_for_each_ordered_visitor(const alphabeth_size_t alphabeth_pos, 
-                                        word_tree_t *const child,
-                                        struct expanded_word_tree_node *const expanded,
-                                        bool any_not_deleted,
-                                        struct word_tree_for_each_params *const params, 
-                                        const size_t pos)
+static inline
+void wtree_reappend_child(struct wtree_node *const parent,
+                          const alphabeth_size_t alphabeth_pos, 
+                          const struct wtree_node *const child,
+                          const bool is_deleted)
 {
-  char c = pos_to_char(alphabeth_pos);
-  iter_res_t filter_res = params->filter(pos, c, alphabeth_pos, params->curr_freq[alphabeth_pos] + 1);
-  if(filter_res == SKIP_SUBTREE)
-    return any_not_deleted;
+  // Keep this as branchless as possible, it's in a hot loop
+  // and I don't want the branch predictor to screw me over
 
-  if(filter_res == MARK_DELETED)
-  {
-    child->deletion_level = params->deletion_level;
-    return any_not_deleted;
-  }
+  // non_deleted start idx is 0, so if is_deleted is false, 0 * deleted_idx = non_deleted_idx
+  struct wtree_edge *arr = &parent->children[is_deleted * parent->children_max_size];
+  alphabeth_size_t idx = (!is_deleted * parent->non_deleted_size) + (is_deleted * parent->deleted_size);
 
-  params->curr_str[pos] = c;
-  params->curr_freq[alphabeth_pos]++;
-  if(pos + 1 < params->len)
-  {
-    word_tree_for_each_ordered_helper(child, params, pos + 1);
-  }
-  else
-  {
-    if(params->word_func(params->curr_str, params->curr_freq) == MARK_DELETED)
-      child->deletion_level = params->deletion_level;
-  }
-  params->curr_freq[alphabeth_pos]--;
-  
-  if(child->deletion_level < params->deletion_level)
-  {
-    if(expanded)
-      expanded->non_deleted_children[expanded->non_deleted_size++] = child;
-    any_not_deleted = true;
-  }
+  arr[idx].alphabeth_pos = alphabeth_pos;
+  arr[idx].node = (struct wtree_node*) child;
 
-  return any_not_deleted;
+  parent->non_deleted_size += !is_deleted;
+  parent->deleted_size += is_deleted;
 }
 
-static
-void word_tree_for_each_ordered_helper(word_tree_t *const tree, 
-                                       struct word_tree_for_each_params *const params, 
-                                       const size_t pos)
-{
-  struct expanded_word_tree_node *expanded = word_tree_get_expanded(tree);
-  bool is_expanded_valid = expanded != NULL && !word_tree_expanded_is_invalidated(expanded, params->deletion_level);
-  size_t expanded_non_deleted_size;
-  if(expanded)
-  {
-    expanded_non_deleted_size = expanded->non_deleted_size;
-    expanded->non_deleted_size = 0;
+#define WTREE_FOR_EACH_HELPER(fn_name, invalidate)                                                              \
+  static bool fn_name(struct wtree_node *const tree,                                                            \
+                      struct wtree_for_each_params *const params,                                               \
+                      const size_t pos)                                                                         \
+  {                                                                                                             \
+    if(pos >= params->len)                                                                                      \
+    {                                                                                                           \
+      bool kept = params->word_filter(params->curr_str, params->curr_freq, params->args) != MARK_DELETED;       \
+      if(kept)                                                                                                  \
+        params->word_func(params->curr_str, params->args);                                                      \
+      return kept;                                                                                              \
+    }                                                                                                           \
+                                                                                                                \
+    /* This first loop _should_ be branchless and be able to keep                                               
+       all the data in cache, as it won't follow edge pointers */                                               \
+    alphabeth_size_t non_deleted_size = tree->non_deleted_size;                                                 \
+    tree->non_deleted_size = 0;                                                                                 \
+    for(size_t i = 0; i < non_deleted_size; ++i)                                                                \
+    {                                                                                                           \
+      struct wtree_edge *edge = &tree->children[i];                                                             \
+                                                                                                                \
+      alphabeth_size_t alphabeth_pos = edge->alphabeth_pos;                                                     \
+      char c = pos_to_char(alphabeth_pos);                                                                      \
+      int char_freq = params->curr_freq[alphabeth_pos] + 1;                                                     \
+                                                                                                                \
+      iter_res_t filter_res = params->char_filter(pos, c, alphabeth_pos, char_freq, params->args);              \
+      bool is_deleted = filter_res == MARK_DELETED;                                                             \
+      wtree_reappend_child(tree, alphabeth_pos, edge->node, is_deleted);                                        \
+    }                                                                                                           \
+                                                                                                                \
+    if((invalidate)) {                                                                                          \
+      alphabeth_size_t deleted_size = tree->deleted_size;                                                       \
+      tree->deleted_size = 0;                                                                                   \
+      for(size_t i = 0; i < deleted_size; ++i)                                                                  \
+      {                                                                                                         \
+        struct wtree_edge *edge = &tree->children[tree->children_max_size + i];                                 \
+                                                                                                                \
+        alphabeth_size_t alphabeth_pos = edge->alphabeth_pos;                                                   \
+        char c = pos_to_char(alphabeth_pos);                                                                    \
+        int char_freq = params->curr_freq[alphabeth_pos] + 1;                                                   \
+                                                                                                                \
+        iter_res_t filter_res = params->char_filter(pos, c, alphabeth_pos, char_freq, params->args);            \
+        bool is_deleted = filter_res == MARK_DELETED;                                                           \
+        wtree_reappend_child(tree, alphabeth_pos, edge->node, is_deleted);                                      \
+      }                                                                                                         \
+      qsort(                                                                                                    \
+        tree->children,                                                                                         \
+        tree->non_deleted_size,                                                                                 \
+        sizeof(tree->children[0]),                                                                              \
+        wtree_edge_cmp);                                                                                        \
+    }                                                                                                           \
+                                                                                                                \
+    /* Second loop follows pointers, messing up caches */                                                       \
+    bool any_not_deleted = false;                                                                               \
+    non_deleted_size = tree->non_deleted_size;                                                                  \
+    tree->non_deleted_size = 0;                                                                                 \
+    for(size_t i = 0; i < non_deleted_size; ++i)                                                                \
+    {                                                                                                           \
+      struct wtree_edge *edge = &tree->children[i];                                                             \
+                                                                                                                \
+      params->curr_str[pos] = pos_to_char(edge->alphabeth_pos);                                                 \
+      params->curr_freq[edge->alphabeth_pos]++;                                                                 \
+      bool child_any_not_deleted = fn_name(edge->node, params, pos + 1);                                        \
+      params->curr_freq[edge->alphabeth_pos]--;                                                                 \
+                                                                                                                \
+      wtree_reappend_child(tree, edge->alphabeth_pos, edge->node, !child_any_not_deleted);                      \
+      any_not_deleted |= child_any_not_deleted;                                                                 \
+    }                                                                                                           \
+                                                                                                                \
+    return any_not_deleted;                                                                                     \
   }
 
-  bool any_not_deleted = false;
-  void (*visit_func)(alphabeth_size_t, word_tree_t*) = LAMBDA(void, (alphabeth_size_t i, word_tree_t *child) {
-    any_not_deleted = word_tree_for_each_ordered_visitor(
-        i, child, expanded, any_not_deleted, params, pos);
-  });
-
-  if(params->hint != NULL && params->hint[pos] != 0)
-  {
-    alphabeth_size_t hint_pos = char_to_pos(params->hint[pos]);
-    
-    word_tree_t *child;  
-    if(is_expanded_valid && expanded->non_deleted_size <= 1)
-    {
-      child = expanded->non_deleted_size == 0 ? NULL :
-        expanded->non_deleted_children[0]->alphabeth_pos != hint_pos ? NULL :
-          expanded->non_deleted_children[0]; 
-    }
-    else if(is_expanded_valid)
-    {
-      word_tree_t lookup = { .alphabeth_pos = hint_pos };
-      word_tree_t *lookup_ptr = &lookup;
-      child = bsearch(
-          &lookup_ptr,
-          expanded->non_deleted_children,
-          expanded->non_deleted_size,
-          sizeof(expanded->non_deleted_children[0]),
-          LAMBDA(int, (const void* o1, const void* o2) {
-            return (*((word_tree_t**) o1))->alphabeth_pos - (*((word_tree_t**) o2))->alphabeth_pos;
-          }));
-    }
-    else
-    {
-      child = rb_tree_get(word_tree_children(tree), hint_pos);
-    }
-
-    if(child != NULL)
-      visit_func(hint_pos, child);
-  }
-  else if(is_expanded_valid)
-  {
-    for(size_t i = 0; i < expanded_non_deleted_size; ++i)
-    {
-      word_tree_t *child = expanded->non_deleted_children[i];
-      visit_func(child->alphabeth_pos, child);
-    }
-  }
-  else
-  {
-    // rb_tree_for_each_ordered(word_tree_children(tree), params->deletion_level, visit_func);
-    for(rb_tree_t *curr = rb_tree_first(word_tree_children(tree));
-        curr != NULL;
-        curr = rb_tree_next(curr))
-    {
-      if(curr->value.deletion_level >= params->deletion_level)
-        continue;
-
-      visit_func(curr->value.alphabeth_pos, &curr->value); 
-    } 
-  }
-
-  tree->deletion_level = any_not_deleted ? tree->deletion_level : params->deletion_level;
-  word_tree_set_deletion_level_if_expanded(tree, params->deletion_level);
-}
+WTREE_FOR_EACH_HELPER(__wtree_for_each_ordered_helper, false)
+WTREE_FOR_EACH_HELPER(__wtree_for_each_ordered_helper_invalidated, true)
 
 static inline
-void word_tree_for_each_ordered(word_tree_t *const tree, 
-                                const size_t len, const char *const hint,
-                                iter_res_t (*filter)(size_t, char, alphabeth_size_t, int), 
-                                iter_res_t (*word_func)(char*, int*))
+void wtree_for_each_ordered(wtree_t *const tree, 
+                            const size_t len,
+                            iter_res_t (*char_filter)(size_t, char, alphabeth_size_t, int, void*), 
+                            iter_res_t (*word_filter)(const char*, const int*, void*),
+                            void (*word_func)(const char*, void*),
+                            void *const args)
 {
-  struct word_tree_for_each_params params;
+  struct wtree_for_each_params params;
   params.len = len;
-  params.deletion_level = tree->deletion_level;
-  params.hint = hint;
 
   char word[len + 1];
   word[len] = '\0';
   params.curr_str = word; 
   memset(params.curr_freq, 0, sizeof(params.curr_freq));
 
-  params.filter = filter;
+  params.char_filter = char_filter;
+  params.word_filter = word_filter;
   params.word_func = word_func;
+  params.args = args;
 
-  word_tree_for_each_ordered_helper(tree, &params, 0);
+  if(!tree->invalidated)
+    __wtree_for_each_ordered_helper(tree->root, &params, 0);
+  else
+    __wtree_for_each_ordered_helper_invalidated(tree->root, &params, 0);
 }
 
-static inline void word_tree_undelete_all(word_tree_t *const tree)
+
+static inline void wtree_undelete_all(wtree_t *const tree)
 {
-  tree->deletion_level++;
+  tree->invalidated = true;
 }
 
 // Time - Theta(n)
@@ -1070,23 +647,26 @@ static bool compare_words(reference_t *const ref,
   return anything_changed;
 }
 
-static iter_res_t known_chars_filter(const reference_t *const ref,
-                                     const size_t pos, 
+static iter_res_t known_chars_filter(const size_t pos, 
                                      const char c, 
                                      const alphabeth_size_t alphabeth_pos, 
-                                     const int char_freq)
+                                     const int char_freq,
+                                     void *args)
 {
-  if(ref->found_freq_max[alphabeth_pos] >= 0 && char_freq > ref->found_freq_max[alphabeth_pos])
-    return MARK_DELETED;
-  if(bitset_test(ref->found_not_chars[pos], alphabeth_pos))
-    return MARK_DELETED;
-  return VISIT_SUBTREE;
+  const reference_t *ref = args;
+  // This is in a hot loop, make it branchless at the expense of evaluating multiple conditions
+  bool delete = 
+    (ref->found_chars[pos] != 0 && ref->found_chars[pos] != c) |
+    bitset_test(ref->found_not_chars[pos], alphabeth_pos) |
+    (ref->found_freq_max[alphabeth_pos] >= 0 && char_freq > ref->found_freq_max[alphabeth_pos]);
+  return (delete * MARK_DELETED) + (!delete * VISIT_SUBTREE);
 }
 
-static iter_res_t words_filter(const reference_t *const ref, 
-                               const char *const str, 
-                               const int *const freq)
+static iter_res_t words_filter(const char *const str, 
+                               const int *const freq,
+                               void *args)
 {
+  const reference_t *ref = args;
   for(int i = 0; i < ref->found_freq_min.size; ++i)
   {
     const char_freq_t *min_freq = &ref->found_freq_min.arr[i];
@@ -1099,23 +679,18 @@ static iter_res_t words_filter(const reference_t *const ref,
 
 static inline
 void filter_dictionary(const reference_t *const ref, 
-                       word_tree_t *const tree, 
-                       void (*func)(char*))
+                       wtree_t *const tree, 
+                       void (*func)(const char*, void*))
 {
-  // O(n)
-  word_tree_for_each_ordered(tree, ref->len, ref->found_chars, 
-      LAMBDA(iter_res_t, (size_t pos, char c, alphabeth_size_t alphabeth_pos, int char_freq) { 
-        return known_chars_filter(ref, pos, c, alphabeth_pos, char_freq);
-      }), 
-      LAMBDA(iter_res_t, (char *str, int *freq) {
-        iter_res_t res = words_filter(ref, str, freq);
-        if(res == MARK_KEPT)
-          func(str);
-        return res;
-      }));
+  wtree_for_each_ordered(
+      tree, ref->len, 
+      known_chars_filter, 
+      words_filter,
+      func, 
+      (void*) ref);
 }
 
-static void populate_dictionary(word_tree_t *const tree, 
+static void populate_dictionary(wtree_t *const tree, 
                                 const size_t len, 
                                 const char *const stop_command)
 {
@@ -1130,7 +705,7 @@ static void populate_dictionary(word_tree_t *const tree,
     }
 
     if(strcmp(stop_command, line) == 0)
-		  break;
+      break;
 
 #ifdef DEBUG
     if(len != strlen(line))
@@ -1141,7 +716,7 @@ static void populate_dictionary(word_tree_t *const tree,
     }
 #endif
 
-    word_tree_push(tree, line);
+    wtree_push(tree, line);
   }
 }
 
@@ -1198,7 +773,7 @@ int main()
 
   size_t last_size = -1;
 
-  word_tree_t *tree = new_word_tree();
+  wtree_t *tree = new_word_tree();
   populate_dictionary(tree, len, "+nuova_partita");
  
   for(bool quit = false; !quit; )
@@ -1216,9 +791,7 @@ int main()
 
     reference_t ref;
     init_ref(&ref, ref_str, len);
-
-    word_tree_undelete_all(tree);
-    
+ 
     char line[MAX(len, 32) + 1];
    
     int tries = 0;
@@ -1244,7 +817,7 @@ int main()
         else if(strcmp(line, "+stampa_filtrate") == 0)
         {
           // print_found_ref(&ref);
-          filter_dictionary(&ref, tree, LAMBDA(void, (char *str) { printf("%s\n", str); }));
+          filter_dictionary(&ref, tree, LAMBDA(void, (const char *str, void *args) { printf("%s\n", str); }));
         }
       }
       else if(strcmp(ref.word, line) == 0)
@@ -1252,7 +825,7 @@ int main()
         printf("ok\n");
         game_over = true;
       }
-      else if(!word_tree_contains(tree, line)) 
+      else if(!wtree_contains(tree, line)) 
       {
         printf("not_exists\n");
       }
@@ -1264,7 +837,7 @@ int main()
         if(last_size == -1 || changed)
         {
           last_size = 0;
-          filter_dictionary(&ref, tree, LAMBDA(void, (char *str) { last_size++; }));
+          filter_dictionary(&ref, tree, LAMBDA(void, (const char *str, void* args) { last_size++; }));
         }
         printf("%ld\n", last_size);
 
@@ -1279,6 +852,7 @@ int main()
 quit_program:
     quit = true;
 new_game:
+    wtree_undelete_all(tree);
     ref_dispose(&ref);
   }
 
