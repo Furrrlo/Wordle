@@ -362,7 +362,16 @@ static bool wtree_push_helper(struct wtree_node **const subtree,
       return false;
  
     for(size_t j = i + 1, k = 0; str[j]; ++j, ++k)
-      new_child_node->leaf[k] = char_to_pos(str[j]);
+    {
+      alphabeth_size_t curr_leaf_alphabeth_pos = char_to_pos(str[j]);
+      if(curr_leaf_alphabeth_pos == -1)
+      {
+        free(new_child_node);
+        return false;
+      }
+
+      new_child_node->leaf[k] = curr_leaf_alphabeth_pos;
+    }
   }
 
   wtree_append_new_child(subtree, alphabeth_pos, new_child_node, is_tree_invalidated);
