@@ -8,6 +8,7 @@
 #define LAMBDA(ret_type, _body) ({ ret_type _ _body _; })
 
 #define ALPHABETH_SIZE (alphabeth_size_t)((sizeof(ALPHABETH)-1)/sizeof(char))
+#define NOT_IN_ALPHABETH ((alphabeth_size_t) -1)
 
 // ASCII ordered
 char ALPHABETH[] = "-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz";
@@ -96,7 +97,7 @@ static alphabeth_size_t char_to_pos(const char c)
     return i;
 #endif 
 
-  return -1;
+  return NOT_IN_ALPHABETH;
 }
 
 // Important: struct size should be able to fit into a cache line
@@ -331,7 +332,7 @@ static bool wtree_push_helper(struct wtree_node **const subtree,
     return false;
 
   alphabeth_size_t alphabeth_pos = char_to_pos(str[i]);
-  if(alphabeth_pos == -1)
+  if(alphabeth_pos == NOT_IN_ALPHABETH)
     return false;
 
   // If it's a leaf node, un-leaf it and then proceed normally
@@ -380,7 +381,7 @@ static bool wtree_push_helper(struct wtree_node **const subtree,
     for(size_t k = 0; str[j]; ++j, ++k)
     {
       alphabeth_size_t curr_leaf_alphabeth_pos = char_to_pos(str[j]);
-      if(curr_leaf_alphabeth_pos == -1)
+      if(curr_leaf_alphabeth_pos == NOT_IN_ALPHABETH)
         goto fail;
       if(k >= leaf_len)
         goto fail;
@@ -1016,8 +1017,8 @@ int main()
       {
         bool changed = compare_words(&ref, line, out);
         printf("%s\n", out);
-
-        if(last_size == -1 || changed)
+        
+        if(last_size == (size_t) -1 || changed)
         {
           last_size = 0;
           filter_dictionary(&ref, tree, LAMBDA(void, (const char *str, void* args) { last_size++; }));
