@@ -893,14 +893,12 @@ static void populate_dictionary(wtree_t *const tree,
 
 #ifdef DEBUG
     if(len != strlen(line))
-    {
       printf("Invalid word length %ld, expected %ld for %s\n", strlen(line), len, line);
-      exit(-6);
-      return;
-    }
-#endif
-
+    else if(!wtree_push(tree, line, len))
+      printf("Invalid word %s (probably char out of alphabeth\n", line);
+#else
     wtree_push(tree, line, len);
+#endif
   }
 }
 
