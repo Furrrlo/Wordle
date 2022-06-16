@@ -155,11 +155,30 @@ static inline wtree_t *new_word_tree()
   return tree;
 }
 
+static inline void wtree_node_free(struct wtree_node *node)
+{
+  if(node == NULL)
+    return;
+
+  for(size_t i = 0; i < node->non_deleted_size; ++i)
+  {
+    struct wtree_edge *edge = &node->children[i];
+    wtree_node_free(edge->node);
+  }
+
+  for(size_t i = 0; i < node->deleted_size; ++i)
+  {
+    struct wtree_edge *edge = &node->children[node->children_max_size + i];
+    wtree_node_free(edge->node);
+  }
+
+  free(node);
+}
+
 static inline void wtree_free(wtree_t *tree)
 {
-  if(tree == NULL)
-    return;
-  // TODO:
+  wtree_node_free(tree->root);
+  free(tree);
 }
 
 static inline int wtree_edge_cmp(const void *o1, const void *o2)
@@ -990,6 +1009,6 @@ new_game:
   }
 
   free(out);
-  // word_tree_free(tree);
+  // wtree_free(tree);
   return 0;
 }
