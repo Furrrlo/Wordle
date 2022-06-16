@@ -19,6 +19,8 @@ UpTo18 test uses between 163.840 and 204.800 test strings of 5 characters each, 
 In some tests, input is messed up and doesn't respect what's indicated in the requisites, i.e. 
 characters out of the given alphabeth, or instruction given at the wrong time (in particular, I think it's in the UpTo30).
 
+For subtasks 2 and 4 of Upto30, there seems to be strings too long provided as part of the dictionary.
+
 This, for example, is apparently valid:
 ```
 5
