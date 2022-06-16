@@ -100,12 +100,13 @@ static alphabeth_size_t char_to_pos(const char c)
 }
 
 // Important: struct size should be able to fit into a cache line
-// Max children array size is 65, so it's 3 + 65 * 2 * (1 + 8) = 1173 bytes 
+// Max children array size is 65, so it's 3 + 16 + 65 * 2 * (1 + 8) = 1189 bytes 
 struct wtree_node 
 {
   alphabeth_size_t children_max_size;
   alphabeth_size_t non_deleted_size;
   alphabeth_size_t deleted_size;
+  alphabeth_size_t *leaf;
   struct wtree_edge *children;
 };
 
@@ -120,16 +121,20 @@ typedef struct {
   bool invalidated;
 } wtree_t;
 
-static inline struct wtree_node *new_wtree_node(alphabeth_size_t children_size)
+static inline struct wtree_node *new_wtree_node(alphabeth_size_t children_size,
+                                                alphabeth_size_t leaf_size)
 {
-  struct wtree_node *node = malloc(sizeof(*node) + children_size * 2 * sizeof(node->children[0]));
+  struct wtree_node *node = malloc(sizeof(*node) 
+      + children_size * 2 * sizeof(node->children[0]) 
+      + leaf_size * sizeof(node->leaf[0]));
   if(node == NULL)
     return NULL;
 
   node->children_max_size = children_size;
   node->non_deleted_size = 0;
   node->deleted_size = 0;
-  node->children = (void*) (&node->children + 1);
+  node->leaf = leaf_size == 0 ? NULL : (void*) (&node->children + 1);
+  node->children = children_size == 0 ? NULL : (void*) (&node->children + 1);
   return node;
 }
 
@@ -139,7 +144,7 @@ static inline wtree_t *new_word_tree()
   if(tree == NULL)
     return NULL;
 
-  tree->root = new_wtree_node(1);
+  tree->root = new_wtree_node(1, 0);
   if(tree->root == NULL)
   {
     free(tree);
@@ -163,8 +168,13 @@ static inline int wtree_edge_cmp(const void *o1, const void *o2)
 }
 
 static struct wtree_edge *wtree_node_get_child(const struct wtree_node *const node, 
-                                               const alphabeth_size_t alphabeth_pos)
+                                               const alphabeth_size_t alphabeth_pos,
+                                               bool *const is_deleted,
+                                               size_t *const deleted_pos)
 {
+  if(node->children == NULL)
+    return NULL;
+
   struct wtree_edge lookup = { .alphabeth_pos = alphabeth_pos };
   struct wtree_edge *child = bsearch(
       &lookup,
@@ -173,14 +183,21 @@ static struct wtree_edge *wtree_node_get_child(const struct wtree_node *const no
       sizeof(node->children[0]),
       wtree_edge_cmp);
   if(child != NULL)
+  {
+    if(is_deleted != NULL) *is_deleted = false;
     return child;
+  }
 
   // TODO: optimize?
-  for(int i = 0; i < node->deleted_size; ++i)
+  for(size_t i = 0; i < node->deleted_size; ++i)
   {
     child = &node->children[node->children_max_size + i];
     if(child->alphabeth_pos == alphabeth_pos)
+    {
+      if(is_deleted != NULL) *is_deleted = true;
+      if(deleted_pos != NULL) *deleted_pos = i;
       return child;
+    }
   }
 
   return NULL;
@@ -189,20 +206,92 @@ static struct wtree_edge *wtree_node_get_child(const struct wtree_node *const no
 static bool wtree_contains(const wtree_t *const tree, const char *const str)
 {
   const struct wtree_node *subtree = tree->root;
-  for(size_t i = 0; str[i]; ++i)
+  size_t i;
+  for(i = 0; str[i] && subtree->leaf == NULL; ++i)
   {
-    struct wtree_edge *edge = wtree_node_get_child(subtree, char_to_pos(str[i]));
+    struct wtree_edge *edge = wtree_node_get_child(subtree, char_to_pos(str[i]), NULL, NULL);
     if(edge == NULL)
       return false;
     subtree = edge->node;
   }
 
+  if(subtree != NULL && subtree->leaf != NULL)
+  {
+    for(size_t j = 0; str[i]; ++i, ++j)
+      if(char_to_pos(str[i]) != subtree->leaf[j])
+        return false;
+  }
+
   return true;
 }
 
-static bool wtree_push_helper(struct wtree_node **const subtree_ptr, 
+static void wtree_undelete_child(struct wtree_node *const subtree,
+                                 const struct wtree_edge *const child,
+                                 const size_t deleted_pos)
+{
+  subtree->children[subtree->non_deleted_size++] = *child;
+  qsort(
+    subtree->children,
+    subtree->non_deleted_size,
+    sizeof(subtree->children[0]),
+    wtree_edge_cmp);
+
+  struct wtree_edge *deleted_arr = &subtree->children[subtree->children_max_size];
+  subtree->deleted_size--;
+  for(size_t i = deleted_pos; i < subtree->deleted_size; ++i)
+    deleted_arr[i] = deleted_arr[i + 1];
+}
+
+static void wtree_ensure_children_size(struct wtree_node **const subtree_ptr, size_t to_grow)
+{
+  struct wtree_node* subtree = *subtree_ptr;
+  
+  alphabeth_size_t curr_size = subtree->non_deleted_size + subtree->deleted_size;
+  if(curr_size + to_grow > subtree->children_max_size)
+  {
+    struct wtree_node *old = subtree;
+    *subtree_ptr = (subtree = new_wtree_node(MAX(1, old->children_max_size * 2), 0));
+    subtree->non_deleted_size = old->non_deleted_size;
+    subtree->deleted_size = old->deleted_size;
+    if(old->children)
+    {
+      memcpy(subtree->children, old->children, old->non_deleted_size * sizeof(subtree->children[0]));
+      memcpy(
+          &subtree->children[subtree->children_max_size], 
+          &old->children[old->children_max_size], 
+          old->deleted_size * sizeof(subtree->children[0]));
+    }
+    free(old);
+  }
+}
+
+static void wtree_append_new_child(struct wtree_node **const subtree_ptr,
+                                   const alphabeth_size_t alphabeth_pos,
+                                   const struct wtree_node *const new_child_node,
+                                   const bool is_tree_invalidated)
+{
+  wtree_ensure_children_size(subtree_ptr, 1);
+  
+  struct wtree_node* subtree = *subtree_ptr;
+  struct wtree_edge *child = &subtree->children[subtree->non_deleted_size++];
+  child->alphabeth_pos = alphabeth_pos;
+  child->node = (struct wtree_node*) new_child_node;
+
+  if(!is_tree_invalidated)
+  {
+    qsort(
+        subtree->children,
+        subtree->non_deleted_size,
+        sizeof(subtree->children[0]),
+        wtree_edge_cmp);
+  }
+}
+
+static bool wtree_push_helper(struct wtree_node **const subtree, 
                               const char *const str, 
-                              const size_t i)
+                              const size_t i,
+                              const size_t len,
+                              const bool is_tree_invalidated)
 {
   if(!str[i])
     // Undeletion shouldn't matter if it's already present, 
@@ -213,45 +302,59 @@ static bool wtree_push_helper(struct wtree_node **const subtree_ptr,
   if(alphabeth_pos == -1)
     return false;
 
-  struct wtree_node* subtree = *subtree_ptr;
-  struct wtree_edge *child = wtree_node_get_child(subtree, alphabeth_pos);
-  if(child != NULL)
-    return wtree_push_helper(&child->node, str, i + 1);
-
-  struct wtree_node *new_child_node = new_wtree_node(1);
-  if(new_child_node == NULL)
-    return false;
-  
-  alphabeth_size_t curr_size = subtree->non_deleted_size + subtree->deleted_size;
-  if(curr_size >= subtree->children_max_size)
+  // If it's a leaf node, un-leaf it and then proceed normally
+  bool is_leaf = (*subtree)->leaf != NULL;
+  if(is_leaf)
   {
-    struct wtree_node *old = subtree;
-    *subtree_ptr = (subtree = new_wtree_node(old->children_max_size * 2));
-    subtree->non_deleted_size = old->non_deleted_size;
-    subtree->deleted_size = old->deleted_size;
-    memcpy(subtree->children, old->children, old->non_deleted_size * sizeof(subtree->children[0]));
-    memcpy(
-        &subtree->children[subtree->children_max_size], 
-        &old->children[old->children_max_size], 
-        old->deleted_size * sizeof(subtree->children[0]));
-    free(old);
+    const alphabeth_size_t leaf_alfabeth_pos = (*subtree)->leaf[0]; 
+    struct wtree_node *new_child_node = NULL;
+    if(len - i - 1 > 0)
+    {
+      new_child_node = new_wtree_node(0, len - i - 1);
+      if(new_child_node == NULL)
+        return false;
+
+      for(size_t j = 0; j < len - i - 1; ++j)
+        new_child_node->leaf[j] = (*subtree)->leaf[j + 1];
+    }
+
+    wtree_append_new_child(subtree, leaf_alfabeth_pos, new_child_node, is_tree_invalidated);
   }
 
-  child = &subtree->children[subtree->non_deleted_size++];
-  child->alphabeth_pos = alphabeth_pos;
-  child->node = new_child_node;
-  bool res = wtree_push_helper(&child->node, str, i + 1);
-  qsort(
-      subtree->children, 
-      subtree->non_deleted_size,
-      sizeof(subtree->children[0]),
-      wtree_edge_cmp);
-  return res;
+  bool is_deleted;
+  size_t deleted_pos;
+  struct wtree_edge *child = wtree_node_get_child(*subtree, alphabeth_pos, &is_deleted, &deleted_pos);
+  if(child != NULL)
+  {
+    bool res = wtree_push_helper(&child->node, str, i + 1, len, is_tree_invalidated);
+    if(!res || !is_deleted || is_tree_invalidated)
+      return res;
+    // Added something down the line, need to undelete this one
+    wtree_undelete_child(*subtree, child, deleted_pos); 
+    return res;
+  }
+
+  // Not found, allocate a new child node which is gonna be a leaf
+  struct wtree_node *new_child_node = NULL;
+  if(len - i - 1 > 0)
+  { 
+    new_child_node = new_wtree_node(0, len - i - 1);
+    if(new_child_node == NULL)
+      return false;
+ 
+    for(size_t j = i + 1, k = 0; str[j]; ++j, ++k)
+      new_child_node->leaf[k] = char_to_pos(str[j]);
+  }
+
+  wtree_append_new_child(subtree, alphabeth_pos, new_child_node, is_tree_invalidated);
+  return true;
 }
 
-static inline bool wtree_push(wtree_t *const tree, const char *const str)
+static inline bool wtree_push(wtree_t *const tree, 
+                              const char *const str,
+                              const size_t len)
 {
-  return wtree_push_helper(&tree->root, str, 0);
+  return wtree_push_helper(&tree->root, str, 0, len, tree->invalidated);
 }
 
 typedef enum {
@@ -293,18 +396,44 @@ void wtree_reappend_child(struct wtree_node *const parent,
   parent->deleted_size += is_deleted;
 }
 
+static inline
+bool __wtree_for_each_leaf(struct wtree_node *const tree,
+                           struct wtree_for_each_params *const params,
+                           const size_t pos)
+{
+  bool kept = true;
+  size_t i;
+  for(i = 0; kept && i < params->len - pos; ++i)
+  {
+    alphabeth_size_t alphabeth_pos = tree->leaf[i];
+    char c = params->curr_str[pos + i] = pos_to_char(alphabeth_pos);
+    int char_freq = ++params->curr_freq[alphabeth_pos];
+
+    iter_res_t filter_res = params->char_filter(pos + i, c, alphabeth_pos, char_freq, params->args);
+    kept = filter_res != MARK_DELETED;
+  }
+
+  if(kept)
+    kept = params->word_filter(params->curr_str, params->curr_freq, params->args) != MARK_DELETED;          
+ 
+  for(; i > 0; --i)
+  {
+    alphabeth_size_t alphabeth_pos = tree->leaf[i - 1];
+    --params->curr_freq[alphabeth_pos];
+  }
+
+  if(kept)
+    params->word_func(params->curr_str, params->args);
+  return kept;
+}
+
 #define WTREE_FOR_EACH_HELPER(fn_name, invalidate)                                                              \
   static bool fn_name(struct wtree_node *const tree,                                                            \
                       struct wtree_for_each_params *const params,                                               \
                       const size_t pos)                                                                         \
   {                                                                                                             \
-    if(pos >= params->len)                                                                                      \
-    {                                                                                                           \
-      bool kept = params->word_filter(params->curr_str, params->curr_freq, params->args) != MARK_DELETED;       \
-      if(kept)                                                                                                  \
-        params->word_func(params->curr_str, params->args);                                                      \
-      return kept;                                                                                              \
-    }                                                                                                           \
+    if(tree == NULL || tree->leaf != NULL)                                                                      \
+      return __wtree_for_each_leaf(tree, params, pos);                                                          \
                                                                                                                 \
     /* This first loop _should_ be branchless and be able to keep                                               
        all the data in cache, as it won't follow edge pointers */                                               \
@@ -720,7 +849,7 @@ static void populate_dictionary(wtree_t *const tree,
     }
 #endif
 
-    wtree_push(tree, line);
+    wtree_push(tree, line, len);
   }
 }
 
