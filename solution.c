@@ -222,15 +222,21 @@ static struct wtree_edge *wtree_node_get_child(const struct wtree_node *const no
   return NULL;
 }
 
-static bool wtree_contains(const wtree_t *const tree, const char *const str)
+static bool wtree_contains(const wtree_t *const tree, 
+                           const char *const str,
+                           const size_t len)
 {
   const struct wtree_node *subtree = tree->root;
   size_t i;
   for(i = 0; str[i] && subtree->leaf == NULL; ++i)
   {
+    if(subtree == NULL)
+      return false;
+    
     struct wtree_edge *edge = wtree_node_get_child(subtree, char_to_pos(str[i]), NULL, NULL);
     if(edge == NULL)
       return false;
+    
     subtree = edge->node;
   }
 
@@ -241,7 +247,7 @@ static bool wtree_contains(const wtree_t *const tree, const char *const str)
         return false;
   }
 
-  return true;
+  return i == len;
 }
 
 static void wtree_undelete_child(struct wtree_node *const subtree,
@@ -986,7 +992,7 @@ int main()
         printf("ok\n");
         game_over = true;
       }
-      else if(!wtree_contains(tree, line)) 
+      else if(!wtree_contains(tree, line, len)) 
       {
         printf("not_exists\n");
       }
