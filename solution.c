@@ -319,9 +319,16 @@ static bool wtree_push_helper(struct wtree_node **const subtree,
                               const bool is_tree_invalidated)
 {
   if(!str[i])
-    // Undeletion shouldn't matter if it's already present, 
-    // words can't be duped (I think)
-    return true; 
+  {
+    // words can't be duped (I think), so no need to try
+    // avoiding node undeletion if the input string is already
+    // present
+    return i == len; 
+  }
+  // If subtree is null, it means we are trying to push into
+  // a subleaf, meaning the string is longer than len.
+  if(*subtree == NULL)
+    return false;
 
   alphabeth_size_t alphabeth_pos = char_to_pos(str[i]);
   if(alphabeth_pos == -1)
@@ -332,14 +339,15 @@ static bool wtree_push_helper(struct wtree_node **const subtree,
   if(is_leaf)
   {
     const alphabeth_size_t leaf_alfabeth_pos = (*subtree)->leaf[0]; 
+    const size_t new_leaf_size = len - i - 1;
     struct wtree_node *new_child_node = NULL;
-    if(len - i - 1 > 0)
+    if(new_leaf_size > 0)
     {
-      new_child_node = new_wtree_node(0, len - i - 1);
+      new_child_node = new_wtree_node(0, new_leaf_size);
       if(new_child_node == NULL)
         return false;
-
-      for(size_t j = 0; j < len - i - 1; ++j)
+      // Copy the old leaf, skipping the 1st char
+      for(size_t j = 0; j < new_leaf_size; ++j)
         new_child_node->leaf[j] = (*subtree)->leaf[j + 1];
     }
 
@@ -362,22 +370,30 @@ static bool wtree_push_helper(struct wtree_node **const subtree,
   // Not found, allocate a new child node which is gonna be a leaf
   struct wtree_node *new_child_node = NULL;
   if(len - i - 1 > 0)
-  { 
-    new_child_node = new_wtree_node(0, len - i - 1);
+  {
+    int leaf_len = len - i - 1; 
+    new_child_node = new_wtree_node(0, leaf_len);
     if(new_child_node == NULL)
       return false;
- 
-    for(size_t j = i + 1, k = 0; str[j]; ++j, ++k)
+    
+    size_t j = i + 1; 
+    for(size_t k = 0; str[j]; ++j, ++k)
     {
       alphabeth_size_t curr_leaf_alphabeth_pos = char_to_pos(str[j]);
       if(curr_leaf_alphabeth_pos == -1)
-      {
-        free(new_child_node);
-        return false;
-      }
+        goto fail;
+      if(k >= leaf_len)
+        goto fail;
 
       new_child_node->leaf[k] = curr_leaf_alphabeth_pos;
     }
+
+    if(j == len)
+      goto pass;
+fail:
+      free(new_child_node);
+      return false;
+pass: ;
   }
 
   wtree_append_new_child(subtree, alphabeth_pos, new_child_node, is_tree_invalidated);
