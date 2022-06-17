@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
+#include <inttypes.h>
 
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
@@ -147,7 +148,7 @@ static inline struct wtree_node *new_wtree_node(alphabeth_size_t children_size,
                                                 alphabeth_size_t leaf_size)
 {
   struct wtree_node *node = malloc(sizeof(*node) 
-      + children_size * 2 * sizeof(node->children[0]) 
+      + children_size * sizeof(node->children[0]) 
       + leaf_size * sizeof(node->leaf[0]));
   if(node == NULL)
     return NULL;
@@ -188,9 +189,9 @@ static inline void wtree_node_free(struct wtree_node *node)
     wtree_node_free(edge->node);
   }
 
-  for(size_t i = 0; i < node->deleted_size; ++i)
+  for(size_t i = node->children_max_size - node->deleted_size; i < node->children_max_size; ++i)
   {
-    struct wtree_edge *edge = &node->children[node->children_max_size + i];
+    struct wtree_edge *edge = &node->children[i];
     wtree_node_free(edge->node);
   }
 
@@ -230,9 +231,9 @@ static struct wtree_edge *wtree_node_get_child(const struct wtree_node *const no
   }
 
   // TODO: optimize?
-  for(size_t i = 0; i < node->deleted_size; ++i)
+  for(size_t i = node->children_max_size - node->deleted_size; i < node->children_max_size; ++i)
   {
-    child = &node->children[node->children_max_size + i];
+    child = &node->children[i];
     if(child->alphabeth_pos == alphabeth_pos)
     {
       if(is_deleted != NULL) *is_deleted = true;
@@ -276,17 +277,19 @@ static void wtree_undelete_child(struct wtree_node *const subtree,
                                  const struct wtree_edge *const child,
                                  const size_t deleted_pos)
 {
-  subtree->children[subtree->non_deleted_size++] = *child;
+  struct wtree_edge tmp_child = *child;
+
+  subtree->deleted_size--;
+  size_t first = subtree->children_max_size - subtree->deleted_size;
+  for(size_t i = deleted_pos; i >= first; --i)
+    subtree->children[i] = subtree->children[i - 1];
+
+  subtree->children[subtree->non_deleted_size++] = tmp_child;
   qsort(
     subtree->children,
     subtree->non_deleted_size,
     sizeof(subtree->children[0]),
     wtree_edge_cmp);
-
-  struct wtree_edge *deleted_arr = &subtree->children[subtree->children_max_size];
-  subtree->deleted_size--;
-  for(size_t i = deleted_pos; i < subtree->deleted_size; ++i)
-    deleted_arr[i] = deleted_arr[i + 1];
 }
 
 static void wtree_ensure_children_size(struct wtree_node **const subtree_ptr, size_t to_grow)
@@ -304,8 +307,8 @@ static void wtree_ensure_children_size(struct wtree_node **const subtree_ptr, si
     {
       memcpy(subtree->children, old->children, old->non_deleted_size * sizeof(subtree->children[0]));
       memcpy(
-          &subtree->children[subtree->children_max_size], 
-          &old->children[old->children_max_size], 
+          &subtree->children[subtree->children_max_size - subtree->deleted_size], 
+          &old->children[old->children_max_size - old->deleted_size], 
           old->deleted_size * sizeof(subtree->children[0]));
     }
     free(old);
@@ -450,6 +453,8 @@ struct wtree_for_each_params
 
 static inline
 void wtree_reappend_child(struct wtree_node *const parent,
+                          struct wtree_edge *const deleted_array,
+                          size_t *deleted_idx,
                           const alphabeth_size_t alphabeth_pos, 
                           const struct wtree_node *const child,
                           const bool is_deleted)
@@ -457,15 +462,16 @@ void wtree_reappend_child(struct wtree_node *const parent,
   // Keep this as branchless as possible, it's in a hot loop
   // and I don't want the branch predictor to screw me over
 
-  // non_deleted start idx is 0, so if is_deleted is false, 0 * deleted_idx = non_deleted_idx
-  struct wtree_edge *arr = &parent->children[is_deleted * parent->children_max_size];
-  alphabeth_size_t idx = (!is_deleted * parent->non_deleted_size) + (is_deleted * parent->deleted_size);
+  struct wtree_edge *arr = (struct wtree_edge*) ( 
+    ((uintptr_t) is_deleted * (uintptr_t) deleted_array) + 
+    ((uintptr_t) !is_deleted * (uintptr_t) parent->children));
+  alphabeth_size_t idx = (!is_deleted * parent->non_deleted_size) + (is_deleted * (*deleted_idx - 1));
 
   arr[idx].alphabeth_pos = alphabeth_pos;
   arr[idx].node = (struct wtree_node*) child;
 
   parent->non_deleted_size += !is_deleted;
-  parent->deleted_size += is_deleted;
+  *deleted_idx -= is_deleted;
 }
 
 static inline
@@ -499,6 +505,36 @@ bool __wtree_for_each_leaf(struct wtree_node *const tree,
   return kept;
 }
 
+#define __WTREE_FOR_EACH_DELETION_LOOP(__condition_statement__) {                                               \
+  /* We are going to be overwriting these nodes while iterating, so save their size */                          \
+  alphabeth_size_t non_deleted_size = tree->non_deleted_size;                                                   \
+  tree->non_deleted_size = 0;                                                                                   \
+  /* Since we can't safely override deleted nodes while iterating (we would override) 
+     for sure some non processed nodes if the array was full), save them in an tmp array. */                    \
+  size_t deleted_idx = non_deleted_size;                                                                        \
+  struct wtree_edge deleted[MAX(deleted_idx, 1)]; /* VLA size 0 are UB */                                       \
+                                                                                                                \
+  for(size_t i = 0; i < non_deleted_size; ++i)                                                                  \
+  {                                                                                                             \
+    struct wtree_edge *edge = &tree->children[i];                                                               \
+                                                                                                                \
+    alphabeth_size_t alphabeth_pos = edge->alphabeth_pos;                                                       \
+                                                                                                                \
+    bool is_deleted;                                                                                            \
+    { __condition_statement__ }                                                                                 \
+    wtree_reappend_child(                                                                                       \
+        tree, deleted, &deleted_idx,                                                                            \
+        alphabeth_pos, edge->node, is_deleted);                                                                 \
+  }                                                                                                             \
+  /* Copy the deleted array back into children, appending to the ones already present */                        \
+  size_t new_deleted_size = non_deleted_size - deleted_idx;                                                   \
+  tree->deleted_size += new_deleted_size;                                                                       \
+  memcpy(                                                                                                       \
+    &tree->children[tree->children_max_size - tree->deleted_size],                                              \
+    &deleted[deleted_idx],                                                                                      \
+    new_deleted_size * sizeof(tree->children[0]));                                                              \
+}
+
 #define WTREE_FOR_EACH_HELPER(fn_name, invalidate)                                                              \
   static bool fn_name(struct wtree_node *const tree,                                                            \
                       struct wtree_for_each_params *const params,                                               \
@@ -507,38 +543,32 @@ bool __wtree_for_each_leaf(struct wtree_node *const tree,
     if(tree == NULL || tree->leaf != NULL)                                                                      \
       return __wtree_for_each_leaf(tree, params, pos);                                                          \
                                                                                                                 \
-    /* This first loop _should_ be branchless and be able to keep                                               
-       all the data in cache, as it won't follow edge pointers */                                               \
-    alphabeth_size_t non_deleted_size = tree->non_deleted_size;                                                 \
-    tree->non_deleted_size = 0;                                                                                 \
-    for(size_t i = 0; i < non_deleted_size; ++i)                                                                \
-    {                                                                                                           \
-      struct wtree_edge *edge = &tree->children[i];                                                             \
-                                                                                                                \
-      alphabeth_size_t alphabeth_pos = edge->alphabeth_pos;                                                     \
-      char c = pos_to_char(alphabeth_pos);                                                                      \
-      int char_freq = params->curr_freq[alphabeth_pos] + 1;                                                     \
-                                                                                                                \
-      iter_res_t filter_res = params->char_filter(pos, c, alphabeth_pos, char_freq, params->args);              \
-      bool is_deleted = filter_res == MARK_DELETED;                                                             \
-      wtree_reappend_child(tree, alphabeth_pos, edge->node, is_deleted);                                        \
+    /* I need to move the deleted array to be adjacent to the non_deleted part.
+       I need to pay attention to how I use memcpy, as it doesn't work on overlapping memory,
+       but since I don't have to care about the order, I can just fill the hole in the middle of
+       the two arrays.                                                                            */            \
+    if((invalidate)) {                                                                                          \
+      size_t hole_size = tree->children_max_size - tree->deleted_size - tree->non_deleted_size;                 \
+      size_t to_move_size = MIN(hole_size, tree->deleted_size);                                                 \
+      if(to_move_size > 0)                                                                                      \
+        memcpy(                                                                                                 \
+            &tree->children[tree->non_deleted_size],                                                            \
+            &tree->children[tree->children_max_size - to_move_size],                                            \
+            to_move_size * sizeof(tree->children[0]));                                                          \
+      tree->non_deleted_size += tree->deleted_size;                                                             \
+      tree->deleted_size = 0;                                                                                   \
     }                                                                                                           \
                                                                                                                 \
-    if((invalidate)) {                                                                                          \
-      alphabeth_size_t deleted_size = tree->deleted_size;                                                       \
-      tree->deleted_size = 0;                                                                                   \
-      for(size_t i = 0; i < deleted_size; ++i)                                                                  \
-      {                                                                                                         \
-        struct wtree_edge *edge = &tree->children[tree->children_max_size + i];                                 \
-                                                                                                                \
-        alphabeth_size_t alphabeth_pos = edge->alphabeth_pos;                                                   \
+    /* This first loop _should_ be branchless and be able to keep                                               
+       all the data in cache, as it won't follow edge pointers */                                               \
+    __WTREE_FOR_EACH_DELETION_LOOP({                                                                            \
         char c = pos_to_char(alphabeth_pos);                                                                    \
         int char_freq = params->curr_freq[alphabeth_pos] + 1;                                                   \
+        iter_res_t res = params->char_filter(pos, c, alphabeth_pos, char_freq, params->args);                   \
+        is_deleted = res == MARK_DELETED;                                                                       \
+    });                                                                                                         \
                                                                                                                 \
-        iter_res_t filter_res = params->char_filter(pos, c, alphabeth_pos, char_freq, params->args);            \
-        bool is_deleted = filter_res == MARK_DELETED;                                                           \
-        wtree_reappend_child(tree, alphabeth_pos, edge->node, is_deleted);                                      \
-      }                                                                                                         \
+    if((invalidate)) {                                                                                          \
       qsort(                                                                                                    \
         tree->children,                                                                                         \
         tree->non_deleted_size,                                                                                 \
@@ -547,21 +577,23 @@ bool __wtree_for_each_leaf(struct wtree_node *const tree,
     }                                                                                                           \
                                                                                                                 \
     /* Second loop follows pointers, messing up caches */                                                       \
-    bool any_not_deleted = false;                                                                               \
-    non_deleted_size = tree->non_deleted_size;                                                                  \
-    tree->non_deleted_size = 0;                                                                                 \
-    for(size_t i = 0; i < non_deleted_size; ++i)                                                                \
+    bitset_t child_any_not_deleted[MAX(BITSET_ARRAY_SIZE(tree->non_deleted_size), 1)];                          \
+    for(size_t i = 0; i < tree->non_deleted_size; ++i)                                                          \
     {                                                                                                           \
       struct wtree_edge *edge = &tree->children[i];                                                             \
                                                                                                                 \
       params->curr_str[pos] = pos_to_char(edge->alphabeth_pos);                                                 \
       params->curr_freq[edge->alphabeth_pos]++;                                                                 \
-      bool child_any_not_deleted = fn_name(edge->node, params, pos + 1);                                        \
+      bitset_set(child_any_not_deleted, i, fn_name(edge->node, params, pos + 1));                               \
       params->curr_freq[edge->alphabeth_pos]--;                                                                 \
-                                                                                                                \
-      wtree_reappend_child(tree, edge->alphabeth_pos, edge->node, !child_any_not_deleted);                      \
-      any_not_deleted |= child_any_not_deleted;                                                                 \
     }                                                                                                           \
+                                                                                                                \
+    bool any_not_deleted = false;                                                                               \
+    __WTREE_FOR_EACH_DELETION_LOOP({                                                                            \
+      bool curr_any_not_deleted = bitset_test(child_any_not_deleted, i);                                        \
+      any_not_deleted |= curr_any_not_deleted;                                                                  \
+      is_deleted = !curr_any_not_deleted;                                                                       \
+    });                                                                                                         \
                                                                                                                 \
     return any_not_deleted;                                                                                     \
   }
