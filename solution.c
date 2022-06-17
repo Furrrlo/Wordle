@@ -100,6 +100,27 @@ static alphabeth_size_t char_to_pos(const char c)
   return NOT_IN_ALPHABETH;
 }
 
+typedef unsigned long bitset_t; // 64 bits, exactly the alphabeth size
+#define BITSET_BITS (8 * sizeof(bitset_t))
+#define BITSET_ARRAY_SIZE(size) (((size) + BITSET_BITS - 1) / BITSET_BITS)
+
+static inline
+void bitset_set(bitset_t bitset[], size_t pos, bool val)
+{
+  bitset_t mask = (bitset_t) 1 << (pos % BITSET_BITS);
+  if(val)
+    bitset[pos / BITSET_BITS] |= mask;
+  else
+    bitset[pos / BITSET_BITS] &= ~mask;
+}
+
+static inline
+bool bitset_test(bitset_t bitset[], size_t pos)
+{
+  bitset_t mask = (bitset_t) 1 << (pos % BITSET_BITS);
+  return (bitset[pos / BITSET_BITS] & mask);
+}
+
 // Important: struct size should be able to fit into a cache line
 // Max children array size is 65, so it's 3 + 16 + 65 * 2 * (1 + 8) = 1189 bytes 
 struct wtree_node 
@@ -654,27 +675,6 @@ unsigned short *__freq_to_update_for_pos(char_freqs_t *const freq,
   new->n = 0;
   *requires_sorting = true;
   return &new->n;
-}
-
-typedef unsigned long bitset_t; // 64 bits, exactly the alphabeth size
-#define BITSET_BITS (8 * sizeof(bitset_t))
-#define BITSET_ARRAY_SIZE(size) (((size) + BITSET_BITS - 1) / BITSET_BITS)
-
-static inline
-void bitset_set(bitset_t bitset[], size_t pos, bool val)
-{
-  bitset_t mask = (bitset_t) 1 << (pos % BITSET_BITS);
-  if(val)
-    bitset[pos / BITSET_BITS] |= mask;
-  else
-    bitset[pos / BITSET_BITS] &= ~mask;
-}
-
-static inline
-bool bitset_test(bitset_t bitset[], size_t pos)
-{
-  bitset_t mask = (bitset_t) 1 << (pos % BITSET_BITS);
-  return (bitset[pos / BITSET_BITS] & mask);
 }
 
 typedef struct
