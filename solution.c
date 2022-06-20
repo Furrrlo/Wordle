@@ -1078,6 +1078,6 @@ new_game:
   }
 
   free(out);
-  // wtree_free(tree);
+  wtree_free(tree);
   return 0;
 }
