@@ -920,6 +920,9 @@ static void populate_dictionary(wtree_t *const tree,
       return;
     }
 
+#ifdef PRINT_INPUT
+    printf("Read for populating dict %s\n", line);
+#endif
     if(strcmp(stop_command, line) == 0)
       break;
 
@@ -1017,48 +1020,52 @@ int main()
         goto quit_program;
       }
 
-      // printf("Read %s\n", line);
-      if(game_over || line[0] == '+')
+#ifdef PRINT_INPUT
+      printf("Read %s\n", line);
+#endif
+      // Commands that can always be run
+      if(strcmp(line, "+nuova_partita") == 0)
       {
-        if(strcmp(line, "+nuova_partita") == 0)
-        {
-          goto new_game;
-        }
-        else if(strcmp(line, "+inserisci_inizio") == 0)
-        {
-          populate_dictionary(tree, len, "+inserisci_fine");
-        }
-        else if(strcmp(line, "+stampa_filtrate") == 0)
+        goto new_game;
+      }
+      else if(strcmp(line, "+inserisci_inizio") == 0)
+      {
+        populate_dictionary(tree, len, "+inserisci_fine");
+      }
+      // Stuff that can be run only during games
+      else if(!game_over)
+      {
+        if(strcmp(line, "+stampa_filtrate") == 0)
         {
           // print_found_ref(&ref);
           filter_dictionary(&ref, tree, LAMBDA(void, (const char *str, void *args) { printf("%s\n", str); }));
         }
-      }
-      else if(strcmp(ref.word, line) == 0)
-      {
-        printf("ok\n");
-        game_over = true;
-      }
-      else if(!wtree_contains(tree, line, len)) 
-      {
-        printf("not_exists\n");
-      }
-      else
-      {
-        bool changed = compare_words(&ref, line, out);
-        printf("%s\n", out);
-        
-        if(last_size == (size_t) -1 || changed)
+        else if(strcmp(ref.word, line) == 0)
         {
-          last_size = 0;
-          filter_dictionary(&ref, tree, LAMBDA(void, (const char *str, void* args) { last_size++; }));
-        }
-        printf("%ld\n", last_size);
-
-        if(++tries >= max_guesses)
-        {
-          printf("ko\n");
+          printf("ok\n");
           game_over = true;
+        }
+        else if(!wtree_contains(tree, line, len)) 
+        {
+          printf("not_exists\n");
+        }
+        else
+        {
+          bool changed = compare_words(&ref, line, out);
+          printf("%s\n", out);
+        
+          if(last_size == (size_t) -1 || changed)
+          {
+            last_size = 0;
+            filter_dictionary(&ref, tree, LAMBDA(void, (const char *str, void* args) { last_size++; }));
+          }
+          printf("%ld\n", last_size);
+
+          if(++tries >= max_guesses)
+          {
+            printf("ko\n");
+            game_over = true;
+          }
         }
       }
     }
