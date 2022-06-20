@@ -988,8 +988,6 @@ int main()
   char *out = malloc((len + 1) * sizeof(char));
   out[len] = '\0';
 
-  size_t last_size = -1;
-
   wtree_t *tree = new_word_tree();
   populate_dictionary(tree, len, "+nuova_partita");
  
@@ -1009,6 +1007,8 @@ int main()
     reference_t ref;
     init_ref(&ref, ref_str, len);
  
+    size_t last_size = -1;
+    
     char line[MAX(len, 32) + 1];
    
     int tries = 0;
@@ -1031,6 +1031,7 @@ int main()
       else if(strcmp(line, "+inserisci_inizio") == 0)
       {
         populate_dictionary(tree, len, "+inserisci_fine");
+        last_size = -1;
       }
       // Stuff that can be run only during games
       else if(!game_over)
