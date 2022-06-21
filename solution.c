@@ -913,7 +913,7 @@ static void populate_dictionary(wtree_t *const tree,
   char line[MAX(32, len) + 1];
   for(;;)
   {
-    if(scanf("%s", line) < 0)
+    if(scanf("%s", line) != 1)
     {
       printf("Failed to read dict line\n");
       exit(-52);
@@ -976,7 +976,7 @@ int main()
   check_everything_allrite();
 
   size_t len;
-  if(scanf("%ld", &len) < 0)
+  if(scanf("%ld", &len) != 1)
   {
     printf("Failed to read len\n");
     return -50;
@@ -995,7 +995,7 @@ int main()
   {
     char ref_str[len + 1];
     int max_guesses;
-    if(scanf("%s %d\n", ref_str, &max_guesses) < 0)
+    if(scanf("%s %d\n", ref_str, &max_guesses) != 2)
     {
       printf("Failed to read guesses\n");
       return -51;
@@ -1015,9 +1015,13 @@ int main()
     bool game_over = false;
     for(;;)
     {
-      if(scanf("%s", line) < 0)
-      {
+      int read = scanf("%s", line);
+      if(read == EOF)
         goto quit_program;
+      if(read != 1)
+      {
+        printf("Failed to read line\n");
+        return -54;
       }
 
 #ifdef PRINT_INPUT
