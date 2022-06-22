@@ -317,8 +317,7 @@ static void wtree_ensure_children_size(struct wtree_node **const subtree_ptr, si
 
 static void wtree_append_new_child(struct wtree_node **const subtree_ptr,
                                    const alphabeth_size_t alphabeth_pos,
-                                   const struct wtree_node *const new_child_node,
-                                   const bool is_tree_invalidated)
+                                   const struct wtree_node *const new_child_node)
 {
   wtree_ensure_children_size(subtree_ptr, 1);
   
@@ -327,14 +326,11 @@ static void wtree_append_new_child(struct wtree_node **const subtree_ptr,
   child->alphabeth_pos = alphabeth_pos;
   child->node = (struct wtree_node*) new_child_node;
 
-  if(!is_tree_invalidated)
-  {
-    qsort(
-        subtree->children,
-        subtree->non_deleted_size,
-        sizeof(subtree->children[0]),
-        wtree_edge_cmp);
-  }
+  qsort(
+      subtree->children,
+      subtree->non_deleted_size,
+      sizeof(subtree->children[0]),
+      wtree_edge_cmp);
 }
 
 static bool wtree_push_helper(struct wtree_node **const subtree, 
@@ -376,7 +372,7 @@ static bool wtree_push_helper(struct wtree_node **const subtree,
         new_child_node->leaf[j] = (*subtree)->leaf[j + 1];
     }
 
-    wtree_append_new_child(subtree, leaf_alfabeth_pos, new_child_node, is_tree_invalidated);
+    wtree_append_new_child(subtree, leaf_alfabeth_pos, new_child_node);
   }
 
   bool is_deleted;
@@ -421,7 +417,7 @@ fail:
 pass: ;
   }
 
-  wtree_append_new_child(subtree, alphabeth_pos, new_child_node, is_tree_invalidated);
+  wtree_append_new_child(subtree, alphabeth_pos, new_child_node);
   return true;
 }
 
