@@ -1,5 +1,7 @@
 *.out
 input.txt
 output.txt
+slow_output.txt
+diff.txt
 *Zone.Identifier
 *.swp
