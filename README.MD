@@ -9,7 +9,7 @@ Uses gcc specific extensions and bad code in general.
   exceeds in space complexity.
 - [Overengineered red-black trie](../cea2dc8d8729fe807d3a8496d40e8a4990ae5d10/single_word_tree_red_black.c) same as above, but optionally expands nodes to keep track of 
   undeleted nodes in order to iterate less. Gets killed by bad cache locality and branch missprediction.
-- [ArrayList trie]() current one, hopefully goes well :I
+- [ArrayList trie](./main/solution.c) working one, tries to avoid branch missprediction and cache misses in the hot loop. Got me 30L, so I'd say it works.
 
 ## Grading
 
