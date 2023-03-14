@@ -1,3 +1,7 @@
+Project for the course API at "Politecnico di Milano", academic Year 2020/2021 (see specs [here](./docs/ProvaFinale2022_tema.pdf))
+
+Grade: 30/30 Cum Laude.
+
 Uses gcc specific extensions and bad code in general.
 
 - [ArrayList](../c267ccf06c604bd54f5e1df870a4347ee2184fc9/array_list.c): uses a big-ass list and normally filters it, but it exceeeds in time complexity.
